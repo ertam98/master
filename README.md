@@ -1,2 +1,2 @@
 # master
-Code for Master's thesis
+This is the code for my Master's thesis.
