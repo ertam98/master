@@ -24,7 +24,7 @@ def main():
         task.appendvars(p) # num of x + num of t
         task.appendcons(numcon)
 
-        c = [0.0, 0.0, 1.0,]
+        c = [0.0, 0.0, 1.0]
         task.putcslice(0, p, c)
 
         bkx = [mosek.boundkey.lo,
