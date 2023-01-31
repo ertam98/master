@@ -27,22 +27,15 @@ def main():
         c = [0.0, 0.0, 1.0, 1.0, 1.0]
         task.putcslice(0, 5, c)
 
-        bkx = [mosek.boundkey.lo,
-               mosek.boundkey.lo,
-               mosek.boundkey.fr,
-               mosek.boundkey.fr,
-               mosek.boundkey.fr]
-        blx = [-2.0, 1.0, -inf, -inf, -inf]
-        bux = [+inf, +inf, +inf, +inf, +inf]
         for i in range(p):
-            task.putvarbound(i, bkx[i], blx[i], bux[i])
+            task.putvarbound(i, mosek.boundkey.fr, -inf, inf)
 
         # A = [1, 2]
-        task.putaij(0, 0, 1)
-        task.putaij(0, 1, 2)
+        # task.putaij(0, 0, 1)
+        # task.putaij(0, 1, 2)
         
         # Ax <= 6
-        task.putconbound(0, mosek.boundkey.up, -inf, 6.0)
+        # task.putconbound(0, mosek.boundkey.up, -inf, 6.0)
 
         numafe = 9
         numcone = 3
