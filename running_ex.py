@@ -30,13 +30,6 @@ def main():
         for i in range(p):
             task.putvarbound(i, mosek.boundkey.fr, -inf, inf)
 
-        # A = [1, 2]
-        # task.putaij(0, 0, 1)
-        # task.putaij(0, 1, 2)
-        
-        # Ax <= 6
-        # task.putconbound(0, mosek.boundkey.up, -inf, 6.0)
-
         numafe = 9
         numcone = 3
         task.appendafes(numafe)
