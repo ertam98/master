@@ -5,13 +5,9 @@
 # Ans: (0, 2)
 
 import mosek
-import sys
+from helpfunctions import streamprinter
 
 inf = 0.0
-
-def streamprinter(text):
-    sys.stdout.write(text)
-    sys.stdout.flush()
 
 def main():
     with mosek.Task() as task:
