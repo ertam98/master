@@ -82,6 +82,6 @@ def main():
         task.putobjsense(mosek.objsense.maximize)
 
         # export (remove .mps.gz from filename)
-        task.writedata(problemfile[0:-7] + "test.ptf")
+        task.writedata(problemfile[0:-7] + "_gm.ptf")
 
 main()
