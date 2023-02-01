@@ -77,12 +77,10 @@ def main():
         task.removecons(I[0]+I[1])
 
         # remove redundant variable bounds
-        for j in (I[2]+I[3]):
-            task.putvarbound(j, mosek.boundkey.fr, -inf, +inf)
+        task.putvarboundlistconst(I[2]+I[3], mosek.boundkey.fr, -inf, +inf)
 
         # make all t's free variables
-        for i in range(n, n+p):
-            task.putvarbound(i, mosek.boundkey.fr, -inf, +inf)
+        task.putvarboundsliceconst(n, n+p, mosek.boundkey.fr, -inf, +inf)
             
         # change objective function
         for j in range(n):
@@ -90,7 +88,7 @@ def main():
         for j in range(n, n+p):
             task.putcj(j, 1.0)
         task.putobjsense(mosek.objsense.maximize)
-        
+
         # export
         task.writedata(problemfile[0:-7] + "_exp.ptf")
 

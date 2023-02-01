@@ -69,8 +69,7 @@ def main():
         task.removecons(I[0]+I[1])
 
         # remove redundant variable bounds
-        for j in (I[2]+I[3]):
-            task.putvarbound(j, mosek.boundkey.fr, -inf, +inf)
+        task.putvarboundlistconst(I[2]+I[3], mosek.boundkey.fr, -inf, +inf)
 
         # make t a free variable
         task.putvarbound(n, mosek.boundkey.fr, -inf, +inf)
