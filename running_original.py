@@ -49,5 +49,5 @@ def main():
             print("Other solution status")
 
 
-        task.writedata("running_original.mps.gz")
+        #task.writedata("running_original.mps.gz")
 main()
