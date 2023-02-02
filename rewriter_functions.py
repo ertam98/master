@@ -18,8 +18,11 @@ def getindexset(n, m, bkc, blc, buc, bkx, blx, bux):
     I = [list() for i in range(6)]
     for i in range(m):
         boundtype = bkc[i]
+        if boundtype == mosek.boundkey.ra:
+            I[0].append(i)
+            I[1].append(i)
         if boundtype == mosek.boundkey.up:
-            (I[0]).append(i)
+            I[0].append(i)
         elif boundtype == mosek.boundkey.lo:
             I[1].append(i)
         elif boundtype == mosek.boundkey.fx:
@@ -27,7 +30,10 @@ def getindexset(n, m, bkc, blc, buc, bkx, blx, bux):
     
     for j in range(n):
         boundtype = bkx[j]
-        if boundtype == mosek.boundkey.up:
+        if boundtype == mosek.boundkey.ra:
+            I[2].append(j)
+            I[3].append(j)
+        elif boundtype == mosek.boundkey.up:
             I[2].append(j)
         elif boundtype == mosek.boundkey.lo:
             I[3].append(j)
