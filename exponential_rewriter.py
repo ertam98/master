@@ -62,12 +62,10 @@ def main():
             currentrow += 3
             
         # 2nd element in each cone is 1
-        for row in range(1, 3*p, 3):
-            task.putafeg(row, 1.0)
+        task.putafeglist(range(1, 3*p, 3), [1.0,]*p)
 
-        # 3rd element in each cone is t_i
-        for cone in range(p):
-            task.putafefentry(3*cone + 2, n+cone, 1.0)
+        # 3rd element in each cone is t_i. t_i has position n+i in vars
+        task.putafefentrylist(range(2, 3*p, 3), range(n, n+p), [1.0]*p)
            
         expdomain = task.appendprimalexpconedomain()
         for cone in range(p):

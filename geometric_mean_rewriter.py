@@ -58,7 +58,7 @@ def main():
             # -l_x in g
             task.putafeg(currentrow, -blx[j])
             currentrow += 1
-        # t in cone
+        # t in cone as last element. t has position n in vars
         task.putafefentry(p, n, 1.0)
 
         # Set <F, (x,t)> + g in GMcone
