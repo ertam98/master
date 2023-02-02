@@ -66,11 +66,15 @@ def main():
         gmdomain = task.appendprimalgeomeanconedomain(p+1)
         task.appendacc(gmdomain, range(p+1), None)
 
-        # remove redudant constraints
+        # remove redundant constraints
         task.removecons(I[0]+I[1])
 
         # remove redundant variable bounds
         task.putvarboundlistconst(I[2]+I[3], mosek.boundkey.fr, -inf, +inf)
+
+        # remove integrality to get LP-relaxation
+        task.putvartypelist(range(n),
+                            [mosek.variabletype.type_cont,]*n)
 
         # make t a free variable
         task.putvarbound(n, mosek.boundkey.fr, -inf, +inf)

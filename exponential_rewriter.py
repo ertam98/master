@@ -72,11 +72,15 @@ def main():
         for cone in range(p):
             task.appendacc(expdomain, range(3*cone, 3*cone+3), None)
             
-        # remove redudant constraints
+        # remove redundant constraints
         task.removecons(I[0]+I[1])
 
         # remove redundant variable bounds
         task.putvarboundlistconst(I[2]+I[3], mosek.boundkey.fr, -inf, +inf)
+
+        # remove integrality to get LP-relaxation
+        task.putvartypelist(range(n),
+                            [mosek.variabletype.type_cont,]*n)
 
         # make all t's free variables
         task.putvarboundsliceconst(n, n+p, mosek.boundkey.fr, -inf, +inf)
