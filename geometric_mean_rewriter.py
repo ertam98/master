@@ -1,15 +1,16 @@
 import mosek
-from helpfunctions import streamprinter
 from rewriter_functions import getindexset
 
 inf = 0.0
 
 def main():
-    problemfile = "running_original.mps.gz"
+    #problemfile = "running_original.mps.gz"
+    folder = "benchmark"
+    problemfile = "markshare_4_0.mps.gz"
 
     with mosek.Task() as task:
         # read problemfile
-        task.readdataformat(problemfile, 
+        task.readdataformat(folder + "/" + problemfile, 
                             mosek.dataformat.mps, 
                             mosek.compresstype.gzip)
 
