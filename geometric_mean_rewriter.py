@@ -3,14 +3,14 @@ from rewriter_functions import getindexset
 
 inf = 0.0
 
-def main():
+def geometric_mean_rewriter(importfolder, problemfile, exportfolder):
     #problemfile = "running_original.mps.gz"
-    folder = "benchmark"
-    problemfile = "markshare_4_0.mps.gz"
+    #folder = "benchmark"
+    #problemfile = "markshare_4_0.mps.gz"
 
     with mosek.Task() as task:
         # read problemfile
-        task.readdataformat(folder + "/" + problemfile, 
+        task.readdataformat(importfolder + "/" + problemfile, 
                             mosek.dataformat.mps, 
                             mosek.compresstype.gzip)
 
@@ -86,6 +86,4 @@ def main():
         task.putobjsense(mosek.objsense.maximize)
 
         # export (remove .mps.gz from filename)
-        task.writedata(problemfile[0:-7] + "_gm.ptf")
-
-main()
+        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf")
