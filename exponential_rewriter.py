@@ -93,4 +93,4 @@ def exponential_rewriter(importfolder, problemfile, exportfolder):
         task.putobjsense(mosek.objsense.maximize)
 
         # export
-        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf")
+        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf.gz")

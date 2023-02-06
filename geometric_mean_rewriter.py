@@ -86,4 +86,4 @@ def geometric_mean_rewriter(importfolder, problemfile, exportfolder):
         task.putobjsense(mosek.objsense.maximize)
 
         # export (remove .mps.gz from filename)
-        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf")
+        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf.gz")
