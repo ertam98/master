@@ -1,5 +1,6 @@
 import mosek
 from rewriter_functions import getindexset
+from helpfunctions import combine_lists
 
 inf = 0.0
 
@@ -73,10 +74,12 @@ def exponential_rewriter(importfolder, problemfile, exportfolder):
             task.appendacc(expdomain, range(3*cone, 3*cone+3), None)
             
         # remove redundant constraints
-        task.removecons(I[0]+I[1])
+        # combine lists to avoid duplicates
+        task.removecons(combine_lists(I[0], I[1]))
 
         # remove redundant variable bounds
-        task.putvarboundlistconst(I[2]+I[3], mosek.boundkey.fr, -inf, +inf)
+        # combine lists to avoid duplicates
+        task.putvarboundlistconst(combine_lists(I[2], I[3]), mosek.boundkey.fr, -inf, +inf)
 
         # remove integrality to get LP-relaxation
         task.putvartypelist(range(n),
