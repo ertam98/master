@@ -76,7 +76,7 @@ def rewriter(model, importfolder, problemfile, exportfolder):
         task.putvartypelist(range(n), [mosek.variabletype.type_cont,]*n)
 
         # export (remove .mps.gz from filename)
-        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".ptf.gz")      
+        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".task.gz")      
 
     print('Sucessfully exported %s to %s for %s' %(problemfile, exportfolder, model))
 
