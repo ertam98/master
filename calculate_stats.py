@@ -14,21 +14,25 @@ def main():
     max_exp = max(exp_times.values())
     maxtime = max(max_gm, max_exp)
     
-    gm, exp = list(), list()
+    solved_both = {'gm': list(), 'exp': list()}
+    solved_gm = {'gm': list(), 'exp': list()}
+    solved_exp = {'gm': list(), 'exp': list()}
     for key in gm_times.keys():
         if key in exp_times.keys():
-            gm.append(gm_times[key])
-            exp.append(exp_times[key])
+            solved_both['gm'].append(gm_times[key])
+            solved_both['exp'].append(exp_times[key])
         else:
-            gm.append(gm_times[key])
-            exp.append(10)
+            solved_gm['gm'].append(gm_times[key])
+            solved_gm['exp'].append(10)
     for key in exp_times.keys():
         if key not in gm_times.keys():
-            gm.append(10)
-            exp.append(exp_times[key])
+            solved_exp['gm'].append(10)
+            solved_exp['exp'].append(exp_times[key])
 
     fig, ax = plt.subplots()
-    ax.scatter(gm, exp)
+    ax.scatter(solved_both['gm'], solved_both['exp'], c = 'tab:blue')
+    ax.scatter(solved_gm['gm'], solved_gm['exp'], c = 'tab:red')
+    ax.scatter(solved_exp['gm'], solved_exp['exp'], c = 'tab:green')
     ax.set_xlabel('Geometric mean cone')
     ax.set_ylabel('Exponential cone')
     line = np.arange(0, maxtime, 0.01)
@@ -37,10 +41,12 @@ def main():
 
 def print_stats(filename):
     nSolved = 0 # number of problems solved correctly
+    nMaxtime = 0
     nPrimIll = 0
     nDualIll = 0
     nPriminf = 0
     nDualinf = 0
+    nUnknown = 0
     times = dict()
 
     with open(filename, 'r') as csvfile:
@@ -61,13 +67,20 @@ def print_stats(filename):
                 nPrimIll += 1
             elif int(row['Solution status']) == 8:
                 nDualIll += 1
+            elif row['Response code'] == 'rescode.trm_max_time':
+                nMaxtime += 1
+            elif (int(row['Problem status']) == 0 and
+                int(row['Solution status']) == 0):
+                nUnknown += 1
 
     print('Problems solved correctly: %d' %(nSolved))
     print('Geometic mean of time: %.6f' %(geometric_mean(times.values())))
+    print('Problems timed out: %d' %(nMaxtime))
     print('Primal infeasible: %d' %(nPriminf))
     print('Dual infeasible: %d' %(nDualinf))
     print('Primal illposed: %d' %(nPrimIll))
     print('Dual illposed: %d' %(nDualIll))
+    print('Unknown status: %d' %(nUnknown))
 
     return times
 
