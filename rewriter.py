@@ -10,17 +10,6 @@ def main():
             rewriter('exp', 'benchmark', instance, 'benchmark_exp')
             rewriter('gm', 'benchmark', instance, 'benchmark_gm')
 
-    # for instance in instances:
-    #     exponential_rewriter("benchmark", instance, "benchmark_exp")
-    #     geometric_mean_rewriter("benchmark", instance, "benchmark_gm")
-
-    # rewriter('exp', 'benchmark', "markshare_4_0.mps.gz", 'debug_exp')
-    # rewriter('gm', 'benchmark', "markshare_4_0.mps.gz", 'debug_gm')
-    
-    #problemfile = "running_original.mps.gz"
-    #importfolder = "benchmark"
-    #problemfile = "markshare_4_0.mps.gz"
-
 def rewriter(model, importfolder, problemfile, exportfolder):
     if not (model == 'gm' or model == 'exp'):
         raise ValueError("Parameter 'model' needs to be 'gm' or 'exp'.")
@@ -78,7 +67,8 @@ def rewriter(model, importfolder, problemfile, exportfolder):
         # export (remove .mps.gz from filename)
         task.writedata(exportfolder + "/" + problemfile[0:-7] + ".task.gz")      
 
-    print('Sucessfully exported %s to %s for %s' %(problemfile, exportfolder, model))
+    print('Sucessfully exported %s to %s for %s' %(problemfile, exportfolder,
+                                                   model))
 
 if __name__ == '__main__':
     main()
