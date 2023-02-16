@@ -37,7 +37,7 @@ def solve_export(folder, instance, model):
                             mosek.dataformat.task,
                             mosek.compresstype.gzip)
 
-        task.putdouparam(mosek.dparam.optimizer_max_time, 10.0)
+        task.putdouparam(mosek.dparam.optimizer_max_time, 100.0)
         task.putintparam(mosek.iparam.intpnt_solve_form,
                          mosek.solveform.primal) # solve on primal form
         rescode = task.optimize()
