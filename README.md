@@ -7,9 +7,9 @@ benchmark-v2.txt: Text file with the namnes of all the instances in the benchmar
 
 MyTask.py: mosek.Task() objected adapted for rewriting problems.
 
-rewriter.py: Rewrites problems to geometric mean cone and exponential cone for analytical center (mps.gz -> ptf.gz).
+rewriter.py: Rewrites problems to geometric mean cone and exponential cone for analytical center (mps.gz -> task.gz).
 
-optimizer.py: Optimizes problems and exports stats.
+optimizer.py: Optimizes problems and exports stats to a csv-file.
 
 calculate_stats.py: Calculates stats and create graphs.
 
