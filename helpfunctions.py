@@ -19,3 +19,10 @@ def geometric_mean(mylist):
         result *= element
 
     return result**(1/n)
+
+def myhash(sub, val):
+    temp = sorted(zip(sub, val))
+    sub = (element[0] for element in temp)
+    val = (element[1] for element in temp)
+    
+    return hash((sub, val))
