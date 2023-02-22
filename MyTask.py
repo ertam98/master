@@ -1,4 +1,6 @@
 import mosek
+from helpfunctions import myhash
+from math import isclose
 
 class MyTask(mosek.Task):
     def __init__(self):
@@ -99,10 +101,10 @@ class MyTask(mosek.Task):
                         self.chgvarbound(j, 0, 1, bux)
 
     def __isufinite(self, bk):
-        return bk == mosek.boundkey.ra or bk == mosek.boundkey.up
+        return bk in [mosek.boundkey.ra, mosek.boundkey.up, mosek.boundkey.fx]
 
     def __islfinite(self, bk):
-        return bk == mosek.boundkey.ra or bk == mosek.boundkey.lo 
+        return bk in [mosek.boundkey.ra, mosek.boundkey.lo, mosek.boundkey.fx]
 
     def getinfsuprow(self, i, k):
         nzi, subi, vali = self.getarow(i)
@@ -153,7 +155,6 @@ class MyTask(mosek.Task):
 
         return sup
 
-
     def getvarboundlist(self, subj):
         bkx, blx, bux = list(), list(), list()
         for j in subj:
@@ -179,145 +180,69 @@ class MyTask(mosek.Task):
         ptrb, ptre, sub, val = self.getarowslice(0, m)
         rowpattern = dict() # dictionary for rows with same non-zero elements
         for i in range(m):
-            key = hash(tuple(sorted(sub[ptrb[i]:ptre[i]])))
+            subi = sub[ptrb[i]:ptre[i]]
+            vali = val[ptrb[i]:ptre[i]]
+            normvali = [element / vali[0] for element in vali]
+            key = myhash(subi, normvali)
             if key in rowpattern.keys():
                 rowpattern[key].append(i)
             else:
                 rowpattern[key] = [i,]
 
-        #for i in range(m):
-        #    _, subi, vali = self.getarow(i)
-        #    key = hash(tuple(sorted(subi)))
-        #    if key in rowpattern.keys():
-        #        rowpattern[key].append(i)
-        #    else:
-        #        rowpattern[key] = [i,]
-
-        parallellrows = list() # pairs of parallell rows
-        spairs = list() # normalisation constant for each parallell row
-        for rows in rowpattern.values():
-            nrows = len(rows)
-            if nrows == 1:
-                break #only one row
-
-            hashlist = list()
-            slist = list()
-            for row in rows:
-                subi = sub[ptrb[row]:ptre[row]]
-                vali = val[ptrb[row]:ptre[row]]
-
-                #_, subi, vali = self.getarow(row)
-                vali = self.__sortsparselist(subi, vali)
-                s = vali[0]
-                slist.append(s)
-                vali = [element/s for element in vali]
-                hashlist.append(hash(tuple(vali)))
-
-            temp = sorted(zip(hashlist, rows, slist))
-            hashlist = [element[0] for element in temp]
-            rows = [element[1] for element in temp]
-            slist = [element[2] for element in slist]
-
-            i = 0
-            while i < nrows-1:
-                if hashlist[i] == hashlist[i+1]:
-                    parallellrows.append((rows[i], rows[i+1]))
-                    spairs.append((slist[i], slist[i+1]))
-                    i += 2
-                else:
-                    i += 1
-        
-        n = len(parallellrows)
         deletedrows = list()
-        for i in range(n):
-            pair = parallellrows[i]
-            spair = spairs[i]
+        for rows in rowpattern.values():
+            i = 0
+            while i < len(rows)-1:
+                r = rows[i]
+                subr = sub[ptrb[r]:ptre[r]]
+                valr = val[ptrb[r]:ptre[r]]
+                valr = self.__sortsparselist(subr, valr)
+                subr = sorted(subr)
 
-            bkc, blc, buc = self.getconboundlist(pair)
-
-            # Refers to ZIB: "Presolve Reductions in Mixed Integer Programming"
-            # If one of the constraints is free, then discard case
-            if mosek.boundkey.fr in bkc:
-                break
-
-            # If both are equality constraint, must have same b
-            # See case 1 p. 27-28 in article
-            elif bkc == [mosek.boundkey.fx, mosek.boundkey.fx]:
-                if blc[0] == (spair[0]/spair[1])*blc[1]:
-                    deletedrows.append(pair[1])
-                else:
-                    return 'Infeasible' # possible to raise mosek error?
-
-            # If one of the constraints is fixed
-            # see case 2 on p. 28 in article
-            elif mosek.boundkey.fx in bkc:
-                # 0 or 1 is fixed constraint, other is inequality
-                fxIndex = bkc.index(mosek.boundkey.fx)
-                ineqIndex = 1-fxIndex
-
-                if self.__isufinite(bkc[ineqIndex]):
-                    bq = blc[fxIndex]
-                    br = buc[ineqIndex]
-                    s = spair[fxIndex] / spair[ineqIndex]
+                j = i + 1
+                while j < len(rows):
+                    q = rows[j]
+                    subq = sub[ptrb[q]:ptre[q]]
+                    valq = val[ptrb[q]:ptre[q]]
+                    valq = self.__sortsparselist(subq, valq)
+                    subq = sorted(subq)
                     
-                    if ((bq <= s*br and s > 0)
-                        or (bq >= s*br and s < 0)):
-                        deletedrows.append(pair[ineqIndex])
-                    else:
-                        return 'Infeasible'
-                
-                if self.__islfinite(bkc[ineqIndex]):
-                    bq = blc[fxIndex]
-                    br = -blc[ineqIndex]
-                    s = - spair[fxIndex] / spair[ineqIndex]
+                    # check that the rows are in fact parallell since hash
+                    # might not be perfect
+                    if not subr == subq:
+                        break
+                    s = valq[0] / valr[0] # Aq = s*Ar
+                    for k in range(len(subr)):
+                        # use isclose due to floating number comparison
+                        if not isclose(valq[k], s*valr[k]):
+                            break
 
-                    if ((bq <= s*br and s > 0)
-                        or (bq >= s*br and s < 0)):
-                        deletedrows.append(pair[ineqIndex]) # this index will be duplicate!
-                    else:
-                        return 'Infeasible'
-            
-            # Case 3 on p. 28
-            # How to structure this? Might not be able to remove row if only one constraint is removed
-            else:
-                bkq, bkr = bkc[0], bkc[1] # boundtype for each inequality
-                if self.__isufinite(bkq) and self.__isufinite(bkr):
-                    bq, br = buc[0], buc[1]
-                    s = spair[0] / spair[1]
+                    bkr, blr, bur = self.getconbound(r)
+                    bkq, blq, buq = self.getconbound(q)
 
-                if self.__isufinite(bkq) and self.__islfinite(bkr):
-                    bq, br = buc[0], -blc[1]
-                    s = - spair[0] / spair[1]
+                    if s > 0:
+                        newlr = max(blq/s, blr)
+                        newur = min(buq/s, bur)
 
-                if self.__islfinite(bkq) and self.__isufinite(bkr):
-                    bq, br = -blc[0], buc[1]
-                    s = - spair[0] / spair[1]
+                        lfinite = self.__islfinite(bkq) or self.__islfinite(bkr)
+                        ufinite = self.__isufinite(bkq) or self.__isufinite(bkr)
 
-                if self.__islfinite(bkq) and self.__islfinite(bkr):
-                    bq, br = -blc[0], -blc[1]
-                    s = spair[0] / spair[1]
+                    elif s < 0:
+                        newlr = max(buq/s, blr)
+                        newur = min(blq/s, bur)
+
+                        lfinite = self.__isufinite(bkq) or self.__islfinite(bkr)
+                        ufinite = self.__islfinite(bkq) or self.__isufinite(bkr)
+
+                    self.chgconbound(r, 1, lfinite, newlr)
+                    self.chgconbound(r, 0, ufinite, newur)
+
+                    deletedrows.append(q)
+                    rows.remove(q)
+                    j += 1
+                i += 1
 
         self.removecons(deletedrows)
-
-    def __checkineqcase(self,  bq, br, s, r, q):
-        if bq <= s*br and s > 0:
-            return [r,]
-        
-        elif bq >= s*br and s > 0:
-            return [q,]
-        
-        elif bq > s*br and s < 0:
-            return [r, q]
-
-        elif bq == s*br and s < 0:
-            self.appendcons(1)
-            m = self.getnumcon()
-            self.putconbound(m-1, mosek.boundkey.fx, bq, bq)
-            return [r, q]
-
-        elif bq < s*br and s < 0:
-            return 'Infeasible'
-
 
     def __sortsparselist(self, subi, vali):
         # Adapted from https://stackoverflow.com/a/6618543
