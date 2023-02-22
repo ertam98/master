@@ -51,54 +51,79 @@ class MyTask(mosek.Task):
             elif boundtype == mosek.boundkey.fx:
                 self.I[5].append(j)
 
-    def presolve_domain(self):
-        for j in range(self.getnumvar()): # for each variable
-            nzj, subj, valj = self.getacol(j) # get all non-zero coeffs
-            
-            for count in range(nzj): # for each non-zero coeffs
-                i = subj[count] # constraint index
+    def presolve_domain(self, maxiters):
+        m = self.getnumcon()
+        propcons = set(range(m)) # we don't want duplicate elements
+
+        iters = 0
+        while len(propcons) > 0 and iters < maxiters:
+            iters += 1
+            con = propcons.pop()
+
+            nzi, subi, vali = self.getarow(con)
+            for k in range(nzi):
+                var = subi[k]
+                aij = vali[k]
+                varboundchanged = self.__domain_propagation(con, var, aij)
+
+                # if bound changed, add all cons with that variable to updated
+                # again
+                if varboundchanged:
+                    _, subj, _ = self.getacol(var)
+                    propcons.update(subj)
+
+        return iters
+
+    def __domain_propagation(self, con, var, aij):
+        varboundchanged = False
+        
+        bkc, blc, buc = self.getconbound(con) # get bounds
+        bkx, blx, bux = self.getvarbound(var) # updates each iteration
+
+        if bkx == mosek.boundkey.fx: # already fixed
+            return varboundchanged
+
+        inf, sup = self.getinfsuprow(con, var) # calculate inf and sup
+
+        # if boundupdate is well-defined
+        if self.__isufinite(bkc) and inf != self.neginf:
+            newbound = (buc - inf)/aij
+            if aij > 0.0: # if coeff is positive update upper
+                if self.__isufinite(bkx) and newbound >= bux:
+                    varboundchanged = False
+                else:
+                    self.chgvarbound(var, 0, 1, newbound)
+                    varboundchanged = True
                 
-                bkc, blc, buc = self.getconbound(i) # get bounds
-                bkx, blx, bux = self.getvarbound(j) # updates each iteration
+            else: # if coeff is negative update lower
+                if self.__islfinite(bkx) and newbound <= blx:
+                    varboundchanged = False
+                else:
+                    self.chgvarbound(var, 1, 1, newbound)
+                    varboundchanged = True
 
-                if bkx == mosek.boundkey.fx: # already fixed
-                    break
+        # variable bounds might be updated from above
+        if varboundchanged:
+            bkx, blx, bux = self.getvarbound(var)
 
-                inf, sup = self.getinfsuprow(i, j) # calculate inf and sup
-
-                # if boundupdate is well-defined
-                if self.__isufinite(bkc) and inf != self.neginf:
-                    newbound = (buc - inf)/valj[count]
-                    if valj[count] > 0.0: # if coeff is positive update upper
-                        if self.__isufinite(bkx):
-                            bux = min(newbound, bux)
-                        else:
-                            bux = newbound
-                        self.chgvarbound(j, 0, 1, bux)
-                    else: # if coeff is negative update lower
-                        if self.__islfinite(bkx):
-                            blx = max(newbound, blx)
-                        else:
-                            blx = newbound
-                        self.chgvarbound(j, 1, 1, blx)
-
-                bkx, blx, bux = self.getvarbound(j)
-
-                # if boundupdate is well-defined
-                if self.__islfinite(bkc) and sup != self.posinf:
-                    newbound = (blc - sup)/valj[count]
-                    if valj[count] > 0: # if coeff is positive update lower
-                        if self.__islfinite(bkx):
-                            blx = max(newbound, blx)
-                        else:
-                            blx = newbound
-                        self.chgvarbound(j, 1, 1, blx)
-                    else: # if coeff is negative update upper
-                        if self.__isufinite(bkx):
-                            bux = min(newbound, bux)
-                        else:
-                            bux = newbound
-                        self.chgvarbound(j, 0, 1, bux)
+        # if boundupdate is well-defined
+        if self.__islfinite(bkc) and sup != self.posinf:
+            newbound = (blc - sup)/aij
+            if aij > 0: # if coeff is positive update lower
+                if self.__islfinite(bkx) and blx >= newbound:
+                    varboundchanged = False
+                else:
+                    self.chgvarbound(var, 1, 1, newbound)
+                    varboundchanged = True
+                
+            else: # if coeff is negative update upper
+                if self.__isufinite(bkx) and bux <= newbound:
+                    varboundchanged = False
+                else:
+                    self.chgvarbound(var, 0, 1, newbound)
+                    varboundchanged = True
+                
+        return varboundchanged
 
     def __isufinite(self, bk):
         return bk in [mosek.boundkey.ra, mosek.boundkey.up, mosek.boundkey.fx]
@@ -182,7 +207,7 @@ class MyTask(mosek.Task):
         for i in range(m):
             subi = sub[ptrb[i]:ptre[i]]
             vali = val[ptrb[i]:ptre[i]]
-            normvali = [element / vali[0] for element in vali]
+            normvali = (element / vali[0] for element in vali)
             key = myhash(subi, normvali)
             if key in rowpattern.keys():
                 rowpattern[key].append(i)
