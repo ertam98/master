@@ -1,6 +1,7 @@
 import mosek
 from helpfunctions import myhash
 from math import isclose
+from timeit import default_timer as timer
 
 class MyTask(mosek.Task):
     def __init__(self):
@@ -15,6 +16,12 @@ class MyTask(mosek.Task):
 
     def updatep(self):
         self.p = sum(len(self.I[i]) for i in range(4))
+
+    def removeemptyrows(self):
+        m = self.getnumcon()
+        nz = self.getarownumnzlist(0, m)
+
+        self.removecons([i for i in range(m) if nz[i] == 0])
 
     def getindexset(self):
         n = self.getnumvar()
@@ -61,24 +68,24 @@ class MyTask(mosek.Task):
             con = propcons.pop()
 
             nzi, subi, vali = self.getarow(con)
+            bkc, blc, buc = self.getconbound(con) # get bounds
             for k in range(nzi):
                 var = subi[k]
                 aij = vali[k]
-                varboundchanged = self.__domain_propagation(con, var, aij)
+                
+                bkx, blx, bux = self.getvarbound(var) # get bounds
+                varboundchanged = self.__domain_propagation(con, var, aij, bkc,
+                                                    blc, buc, bkx, blx, bux)
 
                 # if bound changed, add all cons with that variable to updated
                 # again
                 if varboundchanged:
                     _, subj, _ = self.getacol(var)
                     propcons.update(subj)
+                    propcons.remove(con)
 
-        return iters
-
-    def __domain_propagation(self, con, var, aij):
+    def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
         varboundchanged = False
-        
-        bkc, blc, buc = self.getconbound(con) # get bounds
-        bkx, blx, bux = self.getvarbound(var) # updates each iteration
 
         if bkx == mosek.boundkey.fx: # already fixed
             return varboundchanged
@@ -102,10 +109,6 @@ class MyTask(mosek.Task):
                     self.chgvarbound(var, 1, 1, newbound)
                     varboundchanged = True
 
-        # variable bounds might be updated from above
-        if varboundchanged:
-            bkx, blx, bux = self.getvarbound(var)
-
         # if boundupdate is well-defined
         if self.__islfinite(bkc) and sup != self.posinf:
             newbound = (blc - sup)/aij
@@ -122,7 +125,7 @@ class MyTask(mosek.Task):
                 else:
                     self.chgvarbound(var, 0, 1, newbound)
                     varboundchanged = True
-                
+
         return varboundchanged
 
     def __isufinite(self, bk):
@@ -207,7 +210,7 @@ class MyTask(mosek.Task):
         for i in range(m):
             subi = sub[ptrb[i]:ptre[i]]
             vali = val[ptrb[i]:ptre[i]]
-            normvali = (element / vali[0] for element in vali)
+            normvali = [element / vali[0] for element in vali]
             key = myhash(subi, normvali)
             if key in rowpattern.keys():
                 rowpattern[key].append(i)
@@ -252,7 +255,7 @@ class MyTask(mosek.Task):
                         lfinite = self.__islfinite(bkq) or self.__islfinite(bkr)
                         ufinite = self.__isufinite(bkq) or self.__isufinite(bkr)
 
-                    elif s < 0:
+                    else:
                         newlr = max(buq/s, blr)
                         newur = min(blq/s, bur)
 
@@ -267,6 +270,7 @@ class MyTask(mosek.Task):
                     j += 1
                 i += 1
 
+        print(deletedrows)
         self.removecons(deletedrows)
 
     def __sortsparselist(self, subi, vali):
