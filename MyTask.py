@@ -1,7 +1,6 @@
 import mosek
 from helpfunctions import myhash
 from math import isclose
-from timeit import default_timer as timer
 
 class MyTask(mosek.Task):
     def __init__(self):
@@ -82,7 +81,6 @@ class MyTask(mosek.Task):
                 if varboundchanged:
                     _, subj, _ = self.getacol(var)
                     propcons.update(subj)
-                    propcons.remove(con)
 
     def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
         varboundchanged = False
