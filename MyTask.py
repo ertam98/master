@@ -58,6 +58,7 @@ class MyTask(mosek.Task):
                 self.I[5].append(j)
 
     def presolve_domain(self, maxiters):
+        print('Domain propagation started')
         m = self.getnumcon()
         propcons = set(range(m)) # we don't want duplicate elements
 
@@ -81,6 +82,8 @@ class MyTask(mosek.Task):
                 if varboundchanged:
                     _, subj, _ = self.getacol(var)
                     propcons.update(subj)
+        
+        print('Domain propagation finished')
 
     def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
         varboundchanged = False
@@ -202,6 +205,8 @@ class MyTask(mosek.Task):
         return bkc, blc, buc
 
     def presolve_lindep(self):
+        print('Remove parallel rows')
+
         m = self.getnumcon()
         ptrb, ptre, sub, val = self.getarowslice(0, m)
         rowpattern = dict() # dictionary for rows with same non-zero elements
@@ -268,7 +273,6 @@ class MyTask(mosek.Task):
                     j += 1
                 i += 1
 
-        print(deletedrows)
         self.removecons(deletedrows)
 
     def __sortsparselist(self, subi, vali):
