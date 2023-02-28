@@ -20,9 +20,9 @@ def geometric_mean(mylist):
 
     return result**(1/n)
 
-def myhash(sub, val):
+def myhash(sub, val, tol):
     temp = sorted(zip(sub, val))
     sub = (element[0] for element in temp)
-    val = (round(1e5*element[1]) for element in temp)
+    val = (round(tol*element[1]) for element in temp)
     
     return hash((sub, val))
