@@ -1,6 +1,6 @@
 import mosek
 from helpfunctions import myhash
-from math import isclose
+from math import isclose, floor, ceil
 
 class MyTask(mosek.Task):
     def __init__(self):
@@ -62,6 +62,8 @@ class MyTask(mosek.Task):
         m = self.getnumcon()
         propcons = set(range(m)) # we don't want duplicate elements
 
+        self.__calculate_minmaxact()
+
         iters = 0
         while len(propcons) > 0 and iters < maxiters:
             iters += 1
@@ -74,115 +76,255 @@ class MyTask(mosek.Task):
                 aij = vali[k]
                 
                 bkx, blx, bux = self.getvarbound(var) # get bounds
-                varboundchanged = self.__domain_propagation(con, var, aij, bkc,
-                                                    blc, buc, bkx, blx, bux)
+                upperboundchanged, lowerboundchanged = \
+                    self.__domain_propagation(con, var, aij,
+                    bkc, blc, buc, bkx, blx, bux)
 
-                # if bound changed, add all cons with that variable to updated
-                # again
-                if varboundchanged:
+                # if bound changed, add all cons with that variable
+                if upperboundchanged or lowerboundchanged:
                     _, subj, _ = self.getacol(var)
                     propcons.update(subj)
+
+                if upperboundchanged:
+                    self.__update_minmaxact_upper(var, bkx, bux)
+                if lowerboundchanged:
+                    self.__update_minmaxact_lower(var, bkx, blx)
         
+        #print(iters)
+
+        self.__remove_redundant(1e-6)
+
+        self.__del_minmax()
         print('Domain propagation finished')
 
+    def __remove_redundant(self, tol):
+        m = self.getnumcon()
+        bkc, blc, buc = self.getconboundslice(0, m)
+
+        deletedrows = list()
+        for con in range(m):
+            upper_redundant, lower_redundant = False, False
+
+            if self.maxactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
+                if self.maxact[con] <= buc[con] + tol:
+                    upper_redundant = True
+
+            if self.minactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
+                if self.minact[con] >= blc[con]  - tol:
+                    lower_redundant = True
+
+            if (bkc[con] in {mosek.boundkey.fx, mosek.boundkey.ra} and
+                upper_redundant and lower_redundant):
+                deletedrows.append(con)
+            elif bkc[con] == mosek.boundkey.up and upper_redundant:
+                deletedrows.append(con)
+            elif bkc[con] == mosek.boundkey.lo and lower_redundant:
+                deletedrows.append(con)
+
+        self.removecons(deletedrows)
+
+    def __del_minmax(self):
+        del self.minact
+        del self.maxact
+        del self.minactinfcnt
+        del self.maxactinfcnt
+
+    def __calculate_minmaxact(self):
+        m = self.getnumcon()
+        n = self.getnumvar()
+
+        self.minact = [0.0,]*m
+        self.maxact = [0.0,]*m
+        self.minactinfcnt = [0,]*m
+        self.maxactinfcnt = [0,]*m
+
+        ptrb, ptre, sub, val = self.getarowslice(0,m)
+        bkx, blx, bux = self.getvarboundslice(0,n)
+
+        for i in range(m):
+            nzi = self.getarownumnz(i)
+            subi = sub[ptrb[i]:ptre[i]]
+            vali = val[ptrb[i]:ptre[i]]
+            for index in range(nzi):
+                j = subi[index]
+                aij = vali[index]
+
+                if self.__isufinite(bkx[j]):
+                    if aij > 0.0:
+                        self.maxact[i] += aij * bux[j]
+                    else:
+                        self.minact[i] += aij * bux[j]
+                else:
+                    if aij > 0.0:
+                        self.maxactinfcnt[i] += 1
+                    else:
+                        self.minactinfcnt[i] += 1
+
+                if self.__islfinite(bkx[j]):
+                    if aij > 0.0:
+                        self.minact[i] += aij * blx[j]
+                    else:
+                        self.maxact[i] += aij * blx[j]
+                else:
+                    if aij > 0.0:
+                        self.minactinfcnt[i] += 1
+                    else:
+                        self.maxactinfcnt[i] += 1
+
+    def __update_minmaxact_upper(self, var, oldbkx, oldbux):
+        nzj, subj, valj = self.getacol(var)
+        newbkx, _, newbux = self.getvarbound(var)
+        
+        # upper from infinite to finite
+        if not self.__isufinite(oldbkx) and self.__isufinite(newbkx):
+            du = newbux
+            #print(var, 'new upper', du)
+            # since upper bound now is finite, update counter
+            for k in range(nzj):
+                if valj[k] > 0.0:
+                    self.maxactinfcnt[subj[k]] -= 1
+                else:
+                    self.minactinfcnt[subj[k]] -= 1
+        else: # tighter upper bound
+            du = newbux - oldbux # < 0
+            #print(var, 'tighter upper', du)
+
+        for k in range(nzj):
+            if valj[k] > 0.0:
+                self.maxact[subj[k]] += valj[k] * du
+            else:
+                self.minact[subj[k]] += valj[k] * du
+
+    def __update_minmaxact_lower(self, var, oldbkx, oldblx):
+        nzj, subj, valj = self.getacol(var)
+        newbkx, newblx, _ = self.getvarbound(var)
+        
+        if not self.__islfinite(oldbkx) and self.__islfinite(newbkx):
+            dl = newblx
+            #print(var, 'new lower', dl)
+            # since lower bound now is finite, update counter
+            for k in range(nzj):
+                if valj[k] > 0.0:
+                    self.minactinfcnt[subj[k]] -= 1
+                else:
+                    self.minactinfcnt[subj[k]] -= 1
+        else:
+            dl = newblx - oldblx # > 0
+            #print(var, 'tighter lower', dl)
+        
+        for k in range(nzj):
+            if valj[k] > 0.0:
+                self.minact[subj[k]] += valj[k] * dl
+            else:
+                self.maxact[subj[k]] += valj[k] * dl
+
     def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
-        varboundchanged = False
+        upperboundchanged, lowerboundchanged = False, False
 
         if bkx == mosek.boundkey.fx: # already fixed
-            return varboundchanged
+            return upperboundchanged, lowerboundchanged
 
-        inf, sup = self.getinfsuprow(con, var) # calculate inf and sup
+        # calculate inf and sup
+        inf, sup = self.getinfsuprow(con, var, aij, bkx, blx, bux)
 
         # if boundupdate is well-defined
         if self.__isufinite(bkc) and inf != self.neginf:
             newbound = (buc - inf)/aij
+
             if aij > 0.0: # if coeff is positive update upper
+                if self.getvartype(var) == mosek.variabletype.type_int:
+                    newbound = floor(newbound)
+
                 if self.__isufinite(bkx) and newbound >= bux:
-                    varboundchanged = False
+                    upperboundchanged = False
                 else:
                     self.chgvarbound(var, 0, 1, newbound)
-                    varboundchanged = True
+                    upperboundchanged = True
                 
             else: # if coeff is negative update lower
+                if self.getvartype(var) == mosek.variabletype.type_int:
+                    newbound = ceil(newbound)
+
                 if self.__islfinite(bkx) and newbound <= blx:
-                    varboundchanged = False
+                    lowerboundchanged = False
                 else:
                     self.chgvarbound(var, 1, 1, newbound)
-                    varboundchanged = True
+                    lowerboundchanged = True
 
         # if boundupdate is well-defined
         if self.__islfinite(bkc) and sup != self.posinf:
             newbound = (blc - sup)/aij
-            if aij > 0: # if coeff is positive update lower
+            if aij > 0.0: # if coeff is positive update lower
+                if self.getvartype(var) == mosek.variabletype.type_int:
+                    newbound = ceil(newbound)
+
                 if self.__islfinite(bkx) and blx >= newbound:
-                    varboundchanged = False
+                    lowerboundchanged = False
                 else:
                     self.chgvarbound(var, 1, 1, newbound)
-                    varboundchanged = True
+                    lowerboundchanged = True
                 
             else: # if coeff is negative update upper
+                if self.getvartype(var) == mosek.variabletype.type_int:
+                    newbound = floor(newbound)
+
                 if self.__isufinite(bkx) and bux <= newbound:
-                    varboundchanged = False
+                    upperboundchanged = False
                 else:
                     self.chgvarbound(var, 0, 1, newbound)
-                    varboundchanged = True
+                    upperboundchanged = True
 
-        return varboundchanged
+        return upperboundchanged, lowerboundchanged
 
     def __isufinite(self, bk):
-        return bk in [mosek.boundkey.ra, mosek.boundkey.up, mosek.boundkey.fx]
+        return bk in {mosek.boundkey.ra, mosek.boundkey.up, mosek.boundkey.fx}
 
     def __islfinite(self, bk):
-        return bk in [mosek.boundkey.ra, mosek.boundkey.lo, mosek.boundkey.fx]
+        return bk in {mosek.boundkey.ra, mosek.boundkey.lo, mosek.boundkey.fx}
 
-    def getinfsuprow(self, i, k):
-        nzi, subi, vali = self.getarow(i)
-        bkx, blx, bux = self.getvarboundlist(subi)
-
-        if mosek.boundkey.fr in bkx:
+    def getinfsuprow(self, con, var, aij, bkx, blx, bux):
+        if self.minactinfcnt[con] > 1 and self.maxactinfcnt[con] > 1:
             return self.neginf, self.posinf
-        else:
-            inf = self.__getinfrow(k, nzi, subi, vali, bkx, blx, bux)
-            sup = self.__getsuprow(k, nzi, subi, vali, bkx, blx, bux)
 
+        if self.minactinfcnt[con] > 1:
+            inf = self.neginf
+        elif self.minactinfcnt[con] == 0:
+            if aij > 0.0:
+                inf = self.minact[con] - aij * blx
+            else: # aij < 0
+                inf = self.minact[con] - aij * bux
+        else: # == 1
+            if aij > 0.0:
+                if self.__islfinite(bkx): # meaning another variable is inf
+                    inf = self.neginf
+                else:
+                    inf = self.minact[con]
+            else: # aij < 0
+                if self.__isufinite(bkx): # meaning another variable is inf
+                    inf = self.neginf
+                else:
+                    inf = self.minact[con]
+
+        if self.maxactinfcnt[con] > 1:
+            sup = self.posinf
+        elif self.maxactinfcnt[con] == 0:
+            if aij > 0.0:
+                sup = self.maxact[con] - aij * bux
+            else: # aij < 0
+                sup = self.maxact[con] - aij * blx
+        else: # == 1
+            if aij > 0.0:
+                if self.__isufinite(bkx): # meaning another variable is inf
+                    sup = self.posinf
+                else:
+                    sup = self.maxact[con]
+            else: # aij < 0
+                if self.__islfinite(bkx): # meaning another variable is inf
+                    sup = self.posinf
+                else:
+                    sup = self.maxact[con]
+        
         return inf, sup
-    def __getinfrow(self, k, nzi, subi, vali, bkx, blx, bux):
-        inf = 0.0
-
-        for index in range(nzi):
-            if subi[index] == k:
-                pass
-            elif vali[index] > 0.0:
-                if bkx[index] == mosek.boundkey.up:
-                    return self.neginf # x_j not bounded from below
-                else:
-                    inf += vali[index] * blx[index]
-            else:
-                if bkx[index] == mosek.boundkey.lo:
-                    return self.neginf
-                else:
-                    inf += vali[index] * bux[index]
-
-        return inf
-
-    def __getsuprow(self, k, nzi, subi, vali, bkx, blx, bux):
-        sup = 0.0
-
-        for index in range(nzi):
-            if subi[index] == k:
-                pass
-            elif vali[index] > 0.0:
-                if bkx[index] == mosek.boundkey.lo:
-                    return self.posinf
-                else:
-                    sup += vali[index] * bux[index]
-            else:
-                if bkx[index] == mosek.boundkey.up:
-                    return self.posinf
-                else:
-                    sup += vali[index] * blx[index]
-
-        return sup
 
     def getvarboundlist(self, subj):
         bkx, blx, bux = list(), list(), list()
@@ -214,7 +356,7 @@ class MyTask(mosek.Task):
             subi = sub[ptrb[i]:ptre[i]]
             vali = val[ptrb[i]:ptre[i]]
             normvali = [element / vali[0] for element in vali]
-            key = myhash(subi, normvali)
+            key = myhash(subi, normvali, 1e-5) # near lin dep tolerance
             if key in rowpattern.keys():
                 rowpattern[key].append(i)
             else:
@@ -251,7 +393,7 @@ class MyTask(mosek.Task):
                     bkr, blr, bur = self.getconbound(r)
                     bkq, blq, buq = self.getconbound(q)
 
-                    if s > 0:
+                    if s > 0.0:
                         newlr = max(blq/s, blr)
                         newur = min(buq/s, bur)
 
@@ -273,6 +415,7 @@ class MyTask(mosek.Task):
                     j += 1
                 i += 1
 
+        print(deletedrows)
         self.removecons(deletedrows)
 
     def __sortsparselist(self, subi, vali):
