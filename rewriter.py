@@ -7,10 +7,10 @@ def main():
         for line in file:
             instance = line[0:-1] # remove '\n'
 
-            rewriter('exp', 'benchmark', instance, 'benchmark_exp')
-            rewriter('gm', 'benchmark', instance, 'benchmark_gm')
+            rewriter('exp', 'benchmark', instance, 'benchmark_exp', False)
+            rewriter('gm', 'benchmark', instance, 'benchmark_gm', False)
 
-def rewriter(model, importfolder, problemfile, exportfolder):
+def rewriter(model, importfolder, problemfile, exportfolder, withpresolve):
     if not (model == 'gm' or model == 'exp'):
         raise ValueError("Parameter 'model' needs to be 'gm' or 'exp'.")
 
@@ -20,6 +20,11 @@ def rewriter(model, importfolder, problemfile, exportfolder):
         task.readdataformat(importfolder + "/" + problemfile, 
                             mosek.dataformat.mps, 
                             mosek.compresstype.gzip)
+
+        if withpresolve:
+            task.removeemptyrows()
+            task.presolve_domain(1e5)
+            task.presolve_lindep()
 
         n = task.getnumvar() # vars in original problem
 
