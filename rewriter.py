@@ -1,16 +1,17 @@
 import mosek
 from helpfunctions import combine_lists
 from MyTask import MyTask
+from timeit import default_timer as timer
 
 def main():
-    with open('benchmark-v2.txt', 'r') as file:
+    with open('benchmark-v2-small.txt', 'r') as file:
         for line in file:
             instance = line[0:-1] # remove '\n'
 
-            rewriter('exp', 'benchmark', instance, 'benchmark_exp')
-            rewriter('gm', 'benchmark', instance, 'benchmark_gm')
+            rewriter('exp', 'benchmark', instance, 'benchmark_exp_presolve_1', True)
+            rewriter('gm', 'benchmark', instance, 'benchmark_gm_presolve_1', True)
 
-def rewriter(model, importfolder, problemfile, exportfolder):
+def rewriter(model, importfolder, problemfile, exportfolder, withpresolve):
     if not (model == 'gm' or model == 'exp'):
         raise ValueError("Parameter 'model' needs to be 'gm' or 'exp'.")
 
@@ -20,6 +21,21 @@ def rewriter(model, importfolder, problemfile, exportfolder):
         task.readdataformat(importfolder + "/" + problemfile, 
                             mosek.dataformat.mps, 
                             mosek.compresstype.gzip)
+
+        if withpresolve:
+            try:
+                print('Starting presolve')
+                start = timer()
+                task.removeemptyrows()
+                task.presolve_domain(1e8)
+                task.remove_redundant(1e-6)
+                task.presolve_lindep()
+                end = timer()
+                with open('timing_presolve.stat', 'a') as file:
+                    file.write('%s, %f\n' %(problemfile.replace('.mps.gz', ''), end-start))
+                print('Finished presolve in %f sek' %(end-start))
+            except Exception:
+                print(problemfile, 'infeasible by presolve')
 
         n = task.getnumvar() # vars in original problem
 
@@ -65,7 +81,9 @@ def rewriter(model, importfolder, problemfile, exportfolder):
         task.putvartypelist(range(n), [mosek.variabletype.type_cont,]*n)
 
         # export (remove .mps.gz from filename)
-        task.writedata(exportfolder + "/" + problemfile[0:-7] + ".task.gz")      
+        task.writedata(exportfolder + "/"
+                       + problemfile.replace('.mps.gz', '.task.gz')) 
+        #task.writedata(exportfolder + "/" + problemfile[0:-7] + ".task.gz")      
 
     print('Sucessfully exported %s to %s for %s' %(problemfile, exportfolder,
                                                    model))
