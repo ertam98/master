@@ -11,7 +11,7 @@ class MyTask(mosek.Task):
         self.posinf = float('inf')
         self.feas_tol = 1e-6
         self.size_tol = 1e8
-        self.near_lin_dep_tol = 1e-5
+        self.near_lin_dep_tol = 1e5
 
     def getarownumnzlist(self, start, stop):
         return [self.getarownumnz(i) for i in range(start, stop)]
@@ -82,16 +82,10 @@ class MyTask(mosek.Task):
             iters += 1
             con = propcons.pop()
 
-            nzi, subi, vali = self.getarow(con)
-            #bkc, blc, buc = self.getconbound(con) # get bounds
-            #for k in range(nzi):
-            #    var = subi[k]
-            #    aij = vali[k]
+            _, subi, _ = self.getarow(con)
             for var in subi:    
                 bkx, blx, bux = self.getvarbound(var) # get bounds for updating
                 upperboundchanged, lowerboundchanged = self.__dom_prop(con, var)
-                    #self.__domain_propagation(con, var, aij,
-                    #bkc, blc, buc, bkx, blx, bux)
 
                 # if bound changed, add all cons with that variable
                 if upperboundchanged or lowerboundchanged:
@@ -100,23 +94,15 @@ class MyTask(mosek.Task):
                     _, subj, _ = self.getacol(var)
                     propcons.update(subj)
 
-                    nzj, subj, valj = self.getacol(var)
-                    newbkx, newblx, newbux = self.getvarbound(var)
+                    _, newblx, newbux = self.getvarbound(var)
                     if not newblx <= newbux:
                         raise Exception('Infeasible')
 
                 if upperboundchanged:
-                    #self.__update_minmaxact_upper(var, bkx, bux, newbkx, newbux, nzj, subj, valj)
                     self.__update_minmaxact_upper(var, bkx, bux)
                 if lowerboundchanged:
-                    #self.__update_minmaxact_lower(var, bkx, blx, newbkx, newblx, nzj, subj, valj)
                     self.__update_minmaxact_lower(var, bkx, blx)
-        
-        #print(iters)
 
-        #self.__remove_redundant(1e-6)
-
-        #self.__del_minmax()
         print('Domain propagation finished')
         return noboundchanged
 
@@ -139,29 +125,33 @@ class MyTask(mosek.Task):
                     raise Exception('Infeasible')
 
             # Check redundancy:
-            upper_redundant, lower_redundant = False, False
+            #upper_redundant, lower_redundant = False, False
 
             if self.maxactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
                 if self.maxact[con] <= buc[con] + self.feas_tol:
-                    upper_redundant = True
+                    #upper_redundant = True
+                    self.chgconbound(con, False, False, self.posinf)
 
             if self.minactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
                 if self.minact[con] >= blc[con]  - self.feas_tol:
-                    lower_redundant = True
+                    #lower_redundant = True
+                    self.chgconbound(con, True, False, self.neginf)
 
-            if (bkc[con] in {mosek.boundkey.fx, mosek.boundkey.ra} and
-                upper_redundant and lower_redundant):
-                deletedrows.append(con)
-            elif bkc[con] == mosek.boundkey.up and upper_redundant:
-                deletedrows.append(con)
-            elif bkc[con] == mosek.boundkey.lo and lower_redundant:
-                deletedrows.append(con)
+            # if (bkc[con] in {mosek.boundkey.fx, mosek.boundkey.ra} and
+            #     upper_redundant and lower_redundant):
+            #     deletedrows.append(con)
+            # elif bkc[con] == mosek.boundkey.up and upper_redundant:
+            #     deletedrows.append(con)
+            # elif bkc[con] == mosek.boundkey.lo and lower_redundant:
+            #     deletedrows.append(con)
 
-        self.removecons(deletedrows)
+        bkc, _, _ = self.getconboundslice(0,m)
+        self.removecons([con for con in range(m) if bkc[con] == mosek.boundkey.fr])
+        #self.removecons(deletedrows)
 
         print('Removing redundant constraints finished')
 
-        return len(deletedrows) == 0 # True if no removed
+        # return len(deletedrows) == 0 # True if no removed
 
     def presolve_singleton(self):
         print('Removing singletons started')
