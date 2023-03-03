@@ -26,10 +26,11 @@ def rewriter(model, importfolder, problemfile, exportfolder, withpresolve):
             try:
                 print('Starting presolve')
                 start = timer()
-                task.removeemptyrows()
-                task.presolve_domain(1e8)
-                task.remove_redundant(1e-6)
-                task.presolve_lindep()
+                task.presolve()
+                # task.removeemptyrows()
+                # task.presolve_domain(1e8)
+                # task.remove_redundant(1e-6)
+                # task.presolve_lindep()
                 end = timer()
                 with open('timing_presolve.stat', 'a') as file:
                     file.write('%s, %f\n' %(problemfile.replace('.mps.gz', ''), end-start))
