@@ -22,7 +22,7 @@ def geometric_mean(mylist):
 
 def myhash(sub, val, tol):
     temp = sorted(zip(sub, val))
-    sub = (element[0] for element in temp)
-    val = (round(tol*element[1]) for element in temp)
+    sub = tuple(element[0] for element in temp)
+    val = tuple(round(tol*element[1]) for element in temp)
     
     return hash((sub, val))
