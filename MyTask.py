@@ -23,7 +23,8 @@ class MyTask(mosek.Task):
         m = self.getnumcon()
         nz = self.getarownumnzlist(0, m)
 
-        self.removecons([i for i in range(m) if nz[i] == 0])
+        #self.removecons(tuple(i for i in range(m) if nz[i] == 0))
+        self.removecons((i for i in range(m) if nz[i] == 0))
 
     def getindexset(self):
         n = self.getnumvar()
@@ -72,18 +73,41 @@ class MyTask(mosek.Task):
         print('Domain propagation started')
         m = self.getnumcon()
         propcons = set(range(m)) # we don't want duplicate elements
+        #subi, subj, _ = self.getatrip()
+        #prop_con_var = set(zip(subi, subj)) # all non-zeros in A
         noboundchanged = True
 
         self.__calculate_minmaxact()
 
         iters = 0
         while len(propcons) > 0 and iters < maxiters:
-            #print(iters, len(propcons))
+        # while len(prop_con_var) > 0 and iters < maxiters:
+        #     iters += 1
+        #     con, var = prop_con_var.pop()
+
+        #     bkx, blx, bux = self.getvarbound(var) # get bounds for updating
+        #     upperboundchanged, lowerboundchanged = self.__dom_prop(con, var)
+
+        #     if upperboundchanged or lowerboundchanged:
+        #         noboundchanged = False
+
+        #         _, subj, _ = self.getacol(var)
+        #         # add all pairs with var included
+        #         prop_con_var.update(((con, var) for con in subj))
+
+        #         _, newblx, newbux = self.getvarbound(var)
+        #         if not newblx <= newbux:
+        #             raise Exception('Infeasible')
+
+        #     if upperboundchanged:
+        #         self.__update_minmaxact_upper(var, bkx, bux)
+        #     if lowerboundchanged:
+        #         self.__update_minmaxact_lower(var, bkx, blx)
+
             iters += 1
             con = propcons.pop()
-
             _, subi, _ = self.getarow(con)
-            for var in subi:    
+            for var in subi:
                 bkx, blx, bux = self.getvarbound(var) # get bounds for updating
                 upperboundchanged, lowerboundchanged = self.__dom_prop(con, var)
 
@@ -104,6 +128,7 @@ class MyTask(mosek.Task):
                     self.__update_minmaxact_lower(var, bkx, blx)
 
         print('Domain propagation finished')
+        print(iters)
         return noboundchanged
 
     def remove_redundant(self):
@@ -125,17 +150,25 @@ class MyTask(mosek.Task):
                     raise Exception('Infeasible')
 
             # Check redundancy:
-            #upper_redundant, lower_redundant = False, False
-
+            upper_redundant, lower_redundant = False, False
             if self.maxactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
                 if self.maxact[con] <= buc[con] + self.feas_tol:
-                    #upper_redundant = True
-                    self.chgconbound(con, False, False, self.posinf)
+                    upper_redundant = True
+                    #self.chgconbound(con, False, False, self.posinf)
 
             if self.minactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
                 if self.minact[con] >= blc[con]  - self.feas_tol:
-                    #lower_redundant = True
+                    lower_redundant = True
+                    #self.chgconbound(con, True, False, self.neginf)
+
+            if bkc[con] == mosek.boundkey.fx:
+                if lower_redundant and upper_redundant:
+                    deletedrows.append(con)
+            else:
+                if lower_redundant:
                     self.chgconbound(con, True, False, self.neginf)
+                if upper_redundant:
+                    self.chgconbound(con, False, False, self.neginf)
 
             # if (bkc[con] in {mosek.boundkey.fx, mosek.boundkey.ra} and
             #     upper_redundant and lower_redundant):
@@ -146,9 +179,9 @@ class MyTask(mosek.Task):
             #     deletedrows.append(con)
 
         bkc, _, _ = self.getconboundslice(0,m)
-        self.removecons([con for con in range(m) if bkc[con] == mosek.boundkey.fr])
-        #self.removecons(deletedrows)
+        self.removecons([con for con in range(m) if bkc[con] == mosek.boundkey.fr] + deletedrows)
 
+        print(len(deletedrows))
         print('Removing redundant constraints finished')
 
         # return len(deletedrows) == 0 # True if no removed
@@ -156,7 +189,7 @@ class MyTask(mosek.Task):
     def presolve_singleton(self):
         print('Removing singletons started')
         m = self.getnumcon()
-        singlecons = tuple(con for con in range(m) if self.getarownumnz(con) == 1)
+        singlecons = (con for con in range(m) if self.getarownumnz(con) == 1)
         
         # vari = [0,] * len(singlecons)
         # aijs = [0.0,] * len(singlecons)
@@ -167,8 +200,8 @@ class MyTask(mosek.Task):
 
         for con in singlecons:
             _, subi, vali = self.getarow(con)
-            bkc, blc, buc = self.getconbound(con)
-            bkx, blx, bux = self.getvarbound(subi[0])
+            _, blc, buc = self.getconbound(con)
+            _, blx, bux = self.getvarbound(subi[0])
 
             if vali[0] > 0:
                 newu = min(buc/vali[0], bux)
@@ -183,6 +216,8 @@ class MyTask(mosek.Task):
 
                 newl = max(buc/vali[0], blx)
                 self.chgvarbound(subi[0], False, newl > -self.size_tol, newl)
+        
+        #print(len(singlecons))
         print('Removing singletons finished')
 
     def __del_minmax(self):
@@ -264,7 +299,7 @@ class MyTask(mosek.Task):
 
 #    def __update_minmaxact_upper(self, var, oldbkx, oldbux, newbkx, newbux, nzj, subj, valj):
     def __update_minmaxact_upper(self, var, oldbkx, oldbux):
-        nzj, subj, valj = self.getacol(var)
+        _, subj, valj = self.getacol(var)
         newbkx, _, newbux = self.getvarbound(var)
         
         # upper from infinite to finite
@@ -272,44 +307,48 @@ class MyTask(mosek.Task):
             du = newbux
             #print(var, 'new upper', du)
             # since upper bound now is finite, update counter
-            for k in range(nzj):
-                if valj[k] > 0.0:
-                    self.maxactinfcnt[subj[k]] -= 1
+            #for k in range(nzj):
+            for aij, i in zip(valj, subj):
+                if aij > 0.0:
+                    self.maxactinfcnt[i] -= 1
                 else:
-                    self.minactinfcnt[subj[k]] -= 1
+                    self.minactinfcnt[i] -= 1
         else: # tighter upper bound
             du = newbux - oldbux # < 0
             #print(var, 'tighter upper', du)
 
-        for k in range(nzj):
-            if valj[k] > 0.0:
-                self.maxact[subj[k]] += valj[k] * du
+        #for k in range(nzj):
+        for aij, i in zip(valj, subj):
+            if aij > 0.0:
+                self.maxact[i] += aij * du
             else:
-                self.minact[subj[k]] += valj[k] * du
+                self.minact[i] += aij * du
 
 #    def __update_minmaxact_lower(self, var, oldbkx, oldblx, newbkx, newblx, nzj, subj, valj):
     def __update_minmaxact_lower(self, var, oldbkx, oldblx):
-        nzj, subj, valj = self.getacol(var)
+        _, subj, valj = self.getacol(var)
         newbkx, newblx, _ = self.getvarbound(var)
         
         if not self.__islfinite(oldbkx) and self.__islfinite(newbkx):
             dl = newblx
             #print(var, 'new lower', dl)
             # since lower bound now is finite, update counter
-            for k in range(nzj):
-                if valj[k] > 0.0:
-                    self.minactinfcnt[subj[k]] -= 1
+            for aij, i in zip(valj, subj):
+            #for k in range(nzj):
+                if aij > 0.0:
+                    self.minactinfcnt[i] -= 1
                 else:
-                    self.maxactinfcnt[subj[k]] -= 1
+                    self.maxactinfcnt[i] -= 1
         else:
             dl = newblx - oldblx # > 0
             #print(var, 'tighter lower', dl)
         
-        for k in range(nzj):
-            if valj[k] > 0.0:
-                self.minact[subj[k]] += valj[k] * dl
+        for aij, i in zip(valj, subj):
+        # for k in range(nzj):
+            if aij > 0.0:
+                self.minact[i] += aij * dl
             else:
-                self.maxact[subj[k]] += valj[k] * dl
+                self.maxact[i] += aij * dl
 
     def __dom_prop(self, con, var):
 #    def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
@@ -522,6 +561,7 @@ class MyTask(mosek.Task):
 
         #print(deletedrows)
         self.removecons(deletedrows)
+        print(len(deletedrows))
         print('Finished removing parallel rows')
         return len(deletedrows) == 0 # True if not removed
 
