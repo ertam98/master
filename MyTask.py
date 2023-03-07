@@ -215,7 +215,7 @@ class MyTask(mosek.Task):
                 self.chgvarbound(subi[0], False, newu < self.size_tol, newu)
 
                 newl = max(buc/vali[0], blx)
-                self.chgvarbound(subi[0], False, newl > -self.size_tol, newl)
+                self.chgvarbound(subi[0], True, newl > -self.size_tol, newl)
         
         #print(len(singlecons))
         print('Removing singletons finished')
