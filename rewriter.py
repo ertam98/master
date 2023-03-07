@@ -3,6 +3,7 @@ from helpfunctions import combine_lists
 from MyTask import MyTask
 from timeit import default_timer as timer
 
+
 def main():
     with open('benchmark-v2-small.txt', 'r') as file:
         for line in file:
@@ -10,6 +11,7 @@ def main():
 
             rewriter('exp', 'benchmark', instance, 'benchmark_exp_presolve_1', True)
             rewriter('gm', 'benchmark', instance, 'benchmark_gm_presolve_1', True)
+
 
 def rewriter(model, importfolder, problemfile, exportfolder, withpresolve):
     if not (model == 'gm' or model == 'exp'):
@@ -32,10 +34,12 @@ def rewriter(model, importfolder, problemfile, exportfolder, withpresolve):
                 # task.remove_redundant(1e-6)
                 # task.presolve_lindep()
                 end = timer()
-                with open('timing_presolve.stat', 'a') as file:
+                with open('timing_presolve_%s.stat' %(model), 'a') as file:
                     file.write('%s, %f\n' %(problemfile.replace('.mps.gz', ''), end-start))
                 print('Finished presolve in %f sek' %(end-start))
             except Exception:
+                with open('timing_presolve_%s.stat' %(model), 'a') as file:
+                    file.write('%s, %s\n' %(problemfile.replace('.mps.gz', ''), 'infeasible'))
                 print(problemfile, 'infeasible by presolve')
 
         n = task.getnumvar() # vars in original problem
