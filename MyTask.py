@@ -1,6 +1,7 @@
 import mosek
 from helpfunctions import myhash
 from math import isclose, floor, ceil
+from collections import deque
 
 class MyTask(mosek.Task):
     def __init__(self):
@@ -63,75 +64,117 @@ class MyTask(mosek.Task):
 
     def presolve(self):
         self.removeemptyrows()
-        self.presolve_singleton()
         self.remove_redundant()
+        self.presolve_singleton()
+        self.activity_bound()
         self.presolve_domain(1e8)
         self.remove_redundant()
         self.presolve_lindep()
 
     def presolve_domain(self, maxiters):
+        """Performs domain propagation."""
         print('Domain propagation started')
         m = self.getnumcon()
-        propcons = set(range(m)) # we don't want duplicate elements
-        #subi, subj, _ = self.getatrip()
-        #prop_con_var = set(zip(subi, subj)) # all non-zeros in A
-        noboundchanged = True
+        n = self.getnumvar()
 
+        noboundchanged = True
         self.__calculate_minmaxact()
+
+        # Only cons with 1 or 0 variables which are infinate need to be
+        # considered at the start
+        addpropcons = tuple(con for con in range(m) 
+                if self.minactinfcnt[con] <= 1 or self.maxactinfcnt[con] <= 1)
+        propcons = deque(addpropcons, m) #optimised for pop and append
+        isinpropcons = [False,] * m #boolean for which are present in propcons
+        for con in addpropcons:
+            isinpropcons[con] = True
+
+        # A matrix on row and col format
+        ptrb_row, ptre_row, sub_row, val_row = self.getarowslice(0, m)
+        ptrb_col, ptre_col, sub_col, val_col = self.getacolslice(0, n)
+
+        # constraint bounds are unchanged
+        bkc, blc, buc = self.getconboundslice(0, m)
 
         iters = 0
         while len(propcons) > 0 and iters < maxiters:
-        # while len(prop_con_var) > 0 and iters < maxiters:
-        #     iters += 1
-        #     con, var = prop_con_var.pop()
-
-        #     bkx, blx, bux = self.getvarbound(var) # get bounds for updating
-        #     upperboundchanged, lowerboundchanged = self.__dom_prop(con, var)
-
-        #     if upperboundchanged or lowerboundchanged:
-        #         noboundchanged = False
-
-        #         _, subj, _ = self.getacol(var)
-        #         # add all pairs with var included
-        #         prop_con_var.update(((con, var) for con in subj))
-
-        #         _, newblx, newbux = self.getvarbound(var)
-        #         if not newblx <= newbux:
-        #             raise Exception('Infeasible')
-
-        #     if upperboundchanged:
-        #         self.__update_minmaxact_upper(var, bkx, bux)
-        #     if lowerboundchanged:
-        #         self.__update_minmaxact_lower(var, bkx, blx)
-
             iters += 1
-            con = propcons.pop()
-            _, subi, _ = self.getarow(con)
-            for var in subi:
-                bkx, blx, bux = self.getvarbound(var) # get bounds for updating
-                upperboundchanged, lowerboundchanged = self.__dom_prop(con, var)
+            con = propcons.popleft()
+            isinpropcons[con] = False
+
+            subi = sub_row[ptrb_row[con]:ptre_row[con]]
+            vali = val_row[ptrb_row[con]:ptre_row[con]]
+            for var, aij in zip(subi, vali):
+                bkx, blx, bux = self.getvarbound(var) #get bounds for updating
+                ubndchg, lbndchg = self.__dom_prop(con, var, bkx, blx, bux, 
+                                            bkc[con], blc[con], buc[con], aij)
+
+                if ubndchg or lbndchg:
+                    newbkx, newblx, newbux = self.getvarbound(var)
+                    subj = sub_col[ptrb_col[var]:ptre_col[var]]
+                    valj = val_col[ptrb_col[var]:ptre_col[var]]
+                if ubndchg:
+                    self.__update_minmaxact_upper(var, bkx, bux, 
+                    newbkx, newbux, subj, valj)
+                if lbndchg:
+                    self.__update_minmaxact_lower(var, bkx, blx, 
+                    newbkx, newblx, subj, valj)
 
                 # if bound changed, add all cons with that variable
-                if upperboundchanged or lowerboundchanged:
+                if ubndchg or lbndchg:
                     noboundchanged = False
 
-                    _, subj, _ = self.getacol(var)
-                    propcons.update(subj)
-
-                    _, newblx, newbux = self.getvarbound(var)
-                    if not newblx <= newbux:
-                        raise Exception('Infeasible')
-
-                if upperboundchanged:
-                    self.__update_minmaxact_upper(var, bkx, bux)
-                if lowerboundchanged:
-                    self.__update_minmaxact_lower(var, bkx, blx)
-
+                    # Only cons (i) not present in propcons and (ii) have
+                    # a possibility to be bounded in a domain propagation
+                    # need to be added
+                    addprop = tuple(con for con in subj 
+                    if not isinpropcons[con] and (self.minactinfcnt[con] <= 1 
+                    or self.maxactinfcnt[con] <= 1))
+                    
+                    propcons.extend(addprop)
+                    for temp in addprop:
+                        isinpropcons[temp] = True
+        
         print('Domain propagation finished')
         print(iters)
         return noboundchanged
 
+    def activity_bound(self):
+        """Detects hidden fixed constraints and
+        infeasibility based on activity."""
+        m = self.getnumcon()
+        bkc, blc, buc = self.getconboundslice(0, m)
+        
+        self.__calculate_minmaxact()
+
+        for con in range(m):
+            if self.maxactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
+                if self.maxact[con] <= blc[con] - self.feas_tol:
+                    raise Exception('Infeasible')
+                if (self.maxact[con] - blc[con] < self.feas_tol
+                    and bkc[con] != mosek.boundkey.fx):
+                    # if maxact == blc -> fixed constraint
+                    # i.e. chg upper to blc
+                    self.chgconbound(con, 0, 1, blc[con])
+                    # update vectors in order to not call get() which
+                    # flushes updates -> slow down
+                    bkc[con], buc[con] = mosek.boundkey.fx, blc[con]
+
+            if self.minactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
+                if self.minact[con] >= buc[con] + self.feas_tol:
+                    raise Exception('Infeasible')
+                elif (abs(self.minact[con] - buc[con]) < self.feas_tol 
+                      and bkc[con] != mosek.boundkey.fx):
+                    # if minact == buc -> fixed constraint
+                    # i.e. chg lower to buc
+                    self.chgconbound(con, 1, 1, buc[con])
+                    # update vectors in order to not call get() which
+                    # flushes updates -> slow down
+                    bkc[con], blc[con] = mosek.boundkey.fx, buc[con]
+
     def remove_redundant(self):
+        """Removes redundant bounds and constraints based on constraint
+        activity."""
         print('Removing redundant constraints started')
         m = self.getnumcon()
         bkc, blc, buc = self.getconboundslice(0, m)
@@ -140,15 +183,6 @@ class MyTask(mosek.Task):
 
         deletedrows = list()
         for con in range(m):
-            # Check feasibility:
-            if self.maxactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
-                if self.maxact[con] < blc[con] - self.feas_tol:
-                    raise Exception('Infeasible')
-
-            if self.minactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
-                if self.minact[con] > buc[con] + self.feas_tol:
-                    raise Exception('Infeasible')
-
             # Check redundancy:
             upper_redundant, lower_redundant = False, False
             if self.maxactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
@@ -168,15 +202,7 @@ class MyTask(mosek.Task):
                 if lower_redundant:
                     self.chgconbound(con, True, False, self.neginf)
                 if upper_redundant:
-                    self.chgconbound(con, False, False, self.neginf)
-
-            # if (bkc[con] in {mosek.boundkey.fx, mosek.boundkey.ra} and
-            #     upper_redundant and lower_redundant):
-            #     deletedrows.append(con)
-            # elif bkc[con] == mosek.boundkey.up and upper_redundant:
-            #     deletedrows.append(con)
-            # elif bkc[con] == mosek.boundkey.lo and lower_redundant:
-            #     deletedrows.append(con)
+                    self.chgconbound(con, False, False, self.posinf)
 
         bkc, _, _ = self.getconboundslice(0,m)
         self.removecons([con for con in range(m) if bkc[con] == mosek.boundkey.fr] + deletedrows)
@@ -187,36 +213,37 @@ class MyTask(mosek.Task):
         # return len(deletedrows) == 0 # True if no removed
 
     def presolve_singleton(self):
+        """Detects singleton cons and turn them into variable cons."""
         print('Removing singletons started')
         m = self.getnumcon()
-        singlecons = (con for con in range(m) if self.getarownumnz(con) == 1)
+        n = self.getnumvar()
+        singlecons = tuple(con for con in range(m) if self.getarownumnz(con) == 1)
         
-        # vari = [0,] * len(singlecons)
-        # aijs = [0.0,] * len(singlecons)
-        # for k in range(len(singlecons)):
-        #     _, subi, vali = self.getarow(singlecons[k])
-        #     vari[k] = subi[0]
-        #     aijs[k] = vali[0]
+        ptrb, ptre, sub, val = self.getarowslice(0, m)
+        _, blc, buc = self.getconboundslice(0, m)
+        _, blx, bux = self.getvarboundslice(0, n)
+        vartype = self.getvartypelist(range(n))
 
         for con in singlecons:
-            _, subi, vali = self.getarow(con)
-            _, blc, buc = self.getconbound(con)
-            _, blx, bux = self.getvarbound(subi[0])
+            var = sub[ptrb[con]:ptre[con]][0]
+            a =  val[ptrb[con]:ptre[con]][0]
 
-            if vali[0] > 0:
-                newu = min(buc/vali[0], bux)
-                self.chgvarbound(subi[0], False, newu < self.size_tol, newu)
-
-                newl = max(blc/vali[0], blx)
-                self.chgvarbound(subi[0], True, newl > -self.size_tol, newl)
+            if a > 0:
+                newu = min(buc[con]/a, bux[var])
+                newl = max(blc[con]/a, blx[var])
 
             else: # aij < 0
-                newu = min(blc/vali[0], bux)
-                self.chgvarbound(subi[0], False, newu < self.size_tol, newu)
+                newu = min(blc[con]/a, bux[var])
+                newl = max(buc[con]/a, blx[var])
 
-                newl = max(buc/vali[0], blx)
-                self.chgvarbound(subi[0], True, newl > -self.size_tol, newl)
+            if vartype[var] == mosek.variabletype.type_int:
+                newu = floor(newu + self.feas_tol)
+                newl = ceil(newl - self.feas_tol)
+
+            self.chgvarbound(var, False, newu < self.size_tol, newu)
+            self.chgvarbound(var, True, newl > -self.size_tol, newl)
         
+        self.removecons(singlecons)
         #print(len(singlecons))
         print('Removing singletons finished')
 
@@ -236,15 +263,9 @@ class MyTask(mosek.Task):
         self.maxactinfcnt = [0,]*m
 
         subi, subj, val = self.getatrip()
-        #nz = self.getnumanz()
-        #ptrb, ptre, sub, val = self.getarowslice(0,m)
         bkx, blx, bux = self.getvarboundslice(0,n)
 
         for i, j, aij in zip(subi, subj, val):
-            #i = subi[k]
-            #j = subj[k]
-            #aij = val[k]
-
             if self.__isufinite(bkx[j]):
                 if aij > 0.0:
                     self.maxact[i] += aij * bux[j]
@@ -267,47 +288,13 @@ class MyTask(mosek.Task):
                 else:
                     self.maxactinfcnt[i] += 1
 
-        #for i in range(m):
-        #    nzi = self.getarownumnz(i)
-        #    subi = sub[ptrb[i]:ptre[i]]
-        #    vali = val[ptrb[i]:ptre[i]]
-            # for index in range(nzi):
-            #     j = subi[index]
-            #     aij = vali[index]
-
-            #     if self.__isufinite(bkx[j]):
-            #         if aij > 0.0:
-            #             self.maxact[i] += aij * bux[j]
-            #         else:
-            #             self.minact[i] += aij * bux[j]
-            #     else:
-            #         if aij > 0.0:
-            #             self.maxactinfcnt[i] += 1
-            #         else:
-            #             self.minactinfcnt[i] += 1
-
-            #     if self.__islfinite(bkx[j]):
-            #         if aij > 0.0:
-            #             self.minact[i] += aij * blx[j]
-            #         else:
-            #             self.maxact[i] += aij * blx[j]
-            #     else:
-            #         if aij > 0.0:
-            #             self.minactinfcnt[i] += 1
-            #         else:
-            #             self.maxactinfcnt[i] += 1
-
-#    def __update_minmaxact_upper(self, var, oldbkx, oldbux, newbkx, newbux, nzj, subj, valj):
-    def __update_minmaxact_upper(self, var, oldbkx, oldbux):
-        _, subj, valj = self.getacol(var)
-        newbkx, _, newbux = self.getvarbound(var)
+    def __update_minmaxact_upper(self, var, oldbkx, oldbux, newbkx, newbux, subj, valj):
+        #_, subj, valj = self.getacol(var)
+        #newbkx, _, newbux = self.getvarbound(var)
         
         # upper from infinite to finite
         if not self.__isufinite(oldbkx) and self.__isufinite(newbkx):
             du = newbux
-            #print(var, 'new upper', du)
-            # since upper bound now is finite, update counter
-            #for k in range(nzj):
             for aij, i in zip(valj, subj):
                 if aij > 0.0:
                     self.maxactinfcnt[i] -= 1
@@ -315,52 +302,43 @@ class MyTask(mosek.Task):
                     self.minactinfcnt[i] -= 1
         else: # tighter upper bound
             du = newbux - oldbux # < 0
-            #print(var, 'tighter upper', du)
 
-        #for k in range(nzj):
         for aij, i in zip(valj, subj):
             if aij > 0.0:
                 self.maxact[i] += aij * du
             else:
                 self.minact[i] += aij * du
 
-#    def __update_minmaxact_lower(self, var, oldbkx, oldblx, newbkx, newblx, nzj, subj, valj):
-    def __update_minmaxact_lower(self, var, oldbkx, oldblx):
-        _, subj, valj = self.getacol(var)
-        newbkx, newblx, _ = self.getvarbound(var)
+    def __update_minmaxact_lower(self, var, oldbkx, oldblx, newbkx, newblx, subj, valj):
+        #_, subj, valj = self.getacol(var)
+        #newbkx, newblx, _ = self.getvarbound(var)
         
         if not self.__islfinite(oldbkx) and self.__islfinite(newbkx):
             dl = newblx
-            #print(var, 'new lower', dl)
-            # since lower bound now is finite, update counter
             for aij, i in zip(valj, subj):
-            #for k in range(nzj):
                 if aij > 0.0:
                     self.minactinfcnt[i] -= 1
                 else:
                     self.maxactinfcnt[i] -= 1
         else:
             dl = newblx - oldblx # > 0
-            #print(var, 'tighter lower', dl)
         
         for aij, i in zip(valj, subj):
-        # for k in range(nzj):
             if aij > 0.0:
                 self.minact[i] += aij * dl
             else:
                 self.maxact[i] += aij * dl
 
-    def __dom_prop(self, con, var):
-#    def __domain_propagation(self, con, var, aij, bkc, blc, buc, bkx, blx, bux):
-        upperboundchanged, lowerboundchanged = False, False
+    def __dom_prop(self, con, var, bkx, blx, bux, bkc, blc, buc, aij):
+        ubndchg, lbndchg = False, False
         tol = 1e3 * self.feas_tol # minimum increase in bound to be enough
 
-        aij = self.getaij(con, var)
-        bkc, blc, buc = self.getconbound(con)
-        bkx, blx, bux = self.getvarbound(var)
+        #aij = self.getaij(con, var)
+        #bkc, blc, buc = self.getconbound(con)
+        #bkx, blx, bux = self.getvarbound(var)
 
         if bkx == mosek.boundkey.fx: # already fixed
-            return upperboundchanged, lowerboundchanged
+            return ubndchg, lbndchg
 
         # calculate inf and sup
         inf, sup = self.getinfsuprow(con, var, aij, bkx, blx, bux)
@@ -371,50 +349,60 @@ class MyTask(mosek.Task):
 
             if aij > 0.0: # if coeff is positive update upper
                 if self.getvartype(var) == mosek.variabletype.type_int:
-                    newbound = floor(newbound)
+                    # add some slack to rounding
+                    newbound = floor(newbound + self.feas_tol)
 
-                if self.__isufinite(bkx) and newbound + tol >= bux:
-                    upperboundchanged = False
+                if (self.__isufinite(bkx) and newbound + tol >= bux 
+                    or newbound > self.size_tol): # max size
+                    ubndchg = False
                 else:
                     #print(var, 'upper tighter', bux - newbound)
-                    self.chgvarbound(var, 0, 1, newbound)
-                    upperboundchanged = True
+                    # max size on bound
+                    #self.chgvarbound(var, 0, newbound <= self.size_tol, newbound)
+                    self.chgvarbound(var, False, True, newbound)
+                    ubndchg = True
                 
             else: # if coeff is negative update lower
                 if self.getvartype(var) == mosek.variabletype.type_int:
-                    newbound = ceil(newbound)
+                    newbound = ceil(newbound - self.feas_tol)
 
-                if self.__islfinite(bkx) and newbound - tol <= blx:
-                    lowerboundchanged = False
+                if (self.__islfinite(bkx) and newbound - tol <= blx 
+                    or newbound < -self.size_tol):
+                    lbndchg = False
                 else:
                     #print(var, 'lower tigher', newbound - blx)
-                    self.chgvarbound(var, 1, 1, newbound)
-                    lowerboundchanged = True
+                    #self.chgvarbound(var, 1, newbound >= -self.size_tol, newbound)
+                    self.chgvarbound(var, True, True, newbound)
+                    lbndchg = True
 
         # if boundupdate is well-defined
         if self.__islfinite(bkc) and sup != self.posinf:
             newbound = (blc - sup)/aij
             if aij > 0.0: # if coeff is positive update lower
                 if self.getvartype(var) == mosek.variabletype.type_int:
-                    newbound = ceil(newbound)
+                    newbound = ceil(newbound - self.feas_tol)
 
-                if self.__islfinite(bkx) and blx >= newbound - tol:
-                    lowerboundchanged = False
+                if (self.__islfinite(bkx) and blx >= newbound - tol
+                    or newbound < -self.size_tol):
+                    lbndchg = False
                 else:
-                    self.chgvarbound(var, 1, 1, newbound)
-                    lowerboundchanged = True
+                    #self.chgvarbound(var, 1, newbound >= -self.size_tol, newbound)
+                    self.chgvarbound(var, True, True, newbound)
+                    lbndchg = True
                 
             else: # if coeff is negative update upper
                 if self.getvartype(var) == mosek.variabletype.type_int:
-                    newbound = floor(newbound)
+                    newbound = floor(newbound + self.feas_tol)
 
-                if self.__isufinite(bkx) and bux <= newbound + tol:
-                    upperboundchanged = False
+                if (self.__isufinite(bkx) and bux <= newbound + tol 
+                    or newbound > self.size_tol):
+                    ubndchg = False
                 else:
-                    self.chgvarbound(var, 0, 1, newbound)
-                    upperboundchanged = True
+                    #self.chgvarbound(var, 0, newbound <= self.size_tol, newbound)
+                    self.chgvarbound(var, False, True, newbound)
+                    ubndchg = True
 
-        return upperboundchanged, lowerboundchanged
+        return ubndchg, lbndchg
 
     def __isufinite(self, bk):
         return bk in {mosek.boundkey.ra, mosek.boundkey.up, mosek.boundkey.fx}
@@ -487,6 +475,8 @@ class MyTask(mosek.Task):
         return bkc, blc, buc
 
     def presolve_lindep(self):
+        """Detects parallell rows in the matrix A and turn them into a single
+        con."""
         print('Started removing parallel rows')
 
         m = self.getnumcon()
@@ -548,11 +538,14 @@ class MyTask(mosek.Task):
                         ufinite = self.__islfinite(bkq) or self.__isufinite(bkr)
 
                     # Check feasibility
-                    if not newlr <= newur:
+                    if abs(newlr-newur) < self.feas_tol: # set to eq
+                        self.chgconbound(r, 1, lfinite, newlr)
+                        self.chgconbound(r, 0, lfinite, newlr)
+                    elif not newlr <= newur + self.feas_tol:
                         raise Exception('Infeasible')
-
-                    self.chgconbound(r, 1, lfinite, newlr)
-                    self.chgconbound(r, 0, ufinite, newur)
+                    else:
+                        self.chgconbound(r, 1, lfinite, newlr)
+                        self.chgconbound(r, 0, ufinite, newur)
 
                     deletedrows.append(q)
                     rows.remove(q)
@@ -564,6 +557,71 @@ class MyTask(mosek.Task):
         print(len(deletedrows))
         print('Finished removing parallel rows')
         return len(deletedrows) == 0 # True if not removed
+
+    # def chgconbound(self, con, lower, finite, newbound):
+    #     """Adapted method to check feasibility and round for fixed cons."""
+        
+    #     if not finite:
+    #         super().chgconbound(con, lower, finite, newbound)
+    #     else:
+    #         _, blc, buc = self.getconbound(con)
+
+    #         if lower:
+    #             if not newbound <= buc + self.feas_tol:
+    #                 raise Exception('Infeasible')
+
+    #             if abs(newbound - buc) < self.feas_tol:
+    #                 super().chgconbound(con, lower, finite, buc)
+    #             else:
+    #                 super().chgconbound(con, lower, finite, newbound)
+
+    #         else: # change upper
+    #             if not blc <= newbound + self.feas_tol:
+    #                 raise Exception('Infeasible')
+
+    #             if abs(newbound - blc) < self.feas_tol:
+    #                 super().chgconbound(con, lower, finite, blc)
+    #             else:
+    #                 super().chgconbound(con, lower, finite, newbound)
+
+    def chgvarbound(self, var, lower, finite, newbound):
+        """Adapted method to round for fixed vars."""
+
+        if not finite:
+            super().chgvarbound(var, lower, finite, newbound)
+        else:
+            _, blx, bux = self.getvarbound(var)
+            
+            # if new lower bound is close enough to upper -> fixed
+            if lower and abs(newbound - bux) < self.feas_tol:
+                super().chgvarbound(var, lower, finite, bux)
+            # if new upper bound is close enought to lower -> fixed
+            elif not lower and abs(newbound - blx) < self.feas_tol:
+                super().chgvarbound(var, lower, finite, blx)
+            else: # otherwise changed bound to newbound
+                super().chgvarbound(var, lower, finite, newbound)
+
+
+        # if not finite:
+        #     super().chgvarbound(var, lower, finite, newbound)
+        # else:
+        #     _, blx, bux = self.getvarbound(var)
+
+        #     if lower:
+        #         assert(newbound <= bux + self.feas_tol, 'Infeasible')
+
+        #         if abs(newbound - bux) < self.feas_tol:
+        #             super().chgvarbound(var, lower, finite, bux)
+        #         else:
+        #             super().chgvarbound(var, lower, finite, newbound)
+
+        #     else:
+        #         assert(blx - self.feas_tol <= newbound, 'Infeasible')
+
+        #         if abs(newbound - blx) < self.feas_tol:
+        #             super().chgvarbound(var, lower, finite, blx)
+        #         else:
+        #             super().chgvarbound(var, lower, finite, newbound)
 
     def __sortsparselist(self, subi, vali):
         # Adapted from https://stackoverflow.com/a/6618543
