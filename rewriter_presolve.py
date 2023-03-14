@@ -3,7 +3,7 @@ from MyTask import MyTask
 from timeit import default_timer as timer
 
 def main():
-    with open('benchmark-v2-small.txt', 'r') as file:
+    with open('benchmark-v2.txt', 'r') as file:
         for line in file:
             instance = line.replace('.mps.gz\n', '')
 
@@ -24,7 +24,7 @@ def rewriter_presolve(importfolder, instance, filetype, exportfolder):
 
             task.writedata(exportfolder + "/" + instance + '.task.gz')
         except Exception:
-            with open('timing_presolve_%s.stat', 'a') as file:
+            with open('timing_presolve.stat', 'a') as file:
                 file.write('%s, %s\n' %(instance, 'infeasible'))
             print(instance, 'infeasible by presolve')
 
