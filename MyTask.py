@@ -24,8 +24,7 @@ class MyTask(mosek.Task):
         m = self.getnumcon()
         nz = self.getarownumnzlist(0, m)
 
-        #self.removecons(tuple(i for i in range(m) if nz[i] == 0))
-        self.removecons((i for i in range(m) if nz[i] == 0))
+        self.removecons((con for con in range(m) if nz[con] == 0))
 
     def getindexset(self):
         n = self.getnumvar()
@@ -66,6 +65,7 @@ class MyTask(mosek.Task):
         self.removeemptyrows()
         self.remove_redundant()
         self.presolve_singleton()
+        self.tight_int_bound()
         self.activity_bound()
         self.presolve_domain(1e8)
         self.remove_redundant()
@@ -73,14 +73,14 @@ class MyTask(mosek.Task):
 
     def presolve_domain(self, maxiters):
         """Performs domain propagation."""
-        print('Domain propagation started')
+        #print('Domain propagation started')
         m = self.getnumcon()
         n = self.getnumvar()
 
         noboundchanged = True
         self.__calculate_minmaxact()
 
-        # Only cons with 1 or 0 variables which are infinate need to be
+        # Only cons with 1 or 0 variables which are infinite need to be
         # considered at the start
         addpropcons = tuple(con for con in range(m) 
                 if self.minactinfcnt[con] <= 1 or self.maxactinfcnt[con] <= 1)
@@ -111,6 +111,8 @@ class MyTask(mosek.Task):
 
                 if ubndchg or lbndchg:
                     newbkx, newblx, newbux = self.getvarbound(var)
+                    if not newblx <= newbux:
+                        raise Exception('Infeasible')
                     subj = sub_col[ptrb_col[var]:ptre_col[var]]
                     valj = val_col[ptrb_col[var]:ptre_col[var]]
                 if ubndchg:
@@ -135,23 +137,38 @@ class MyTask(mosek.Task):
                     for temp in addprop:
                         isinpropcons[temp] = True
         
-        print('Domain propagation finished')
-        print(iters)
+        #print('Domain propagation finished')
+        #print(iters)
         return noboundchanged
 
+    def tight_int_bound(self):
+        n = self.getnumvar()
+        vartype = self.getvartypelist(range(n))
+        int_vars = (var for var in range(n) if vartype[var] == mosek.variabletype.type_int)
+        bkx, blx, bux = self.getvarboundslice(0, n)
+
+        for var in int_vars:
+            if self.__islfinite(bkx[var]):
+                newl = ceil(blx[var] - self.feas_tol)
+                self.chgvarbound(var, True, True, newl)
+
+            if self.__isufinite(bkx[var]):    
+                newu = floor(bux[var] + self.feas_tol)
+                self.chgvarbound(var, False, True, newu)
+
     def activity_bound(self):
-        """Detects hidden fixed constraints and
-        infeasibility based on activity."""
+        """Detects hidden fixed constraints, infeasibility and tigher bounds
+        based on activity."""
         m = self.getnumcon()
         bkc, blc, buc = self.getconboundslice(0, m)
         
         self.__calculate_minmaxact()
 
         for con in range(m):
-            if self.maxactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
+            if self.maxactinfcnt[con] == 0:
                 if self.maxact[con] <= blc[con] - self.feas_tol:
                     raise Exception('Infeasible')
-                if (self.maxact[con] - blc[con] < self.feas_tol
+                elif (self.maxact[con] < blc[con] + self.feas_tol
                     and bkc[con] != mosek.boundkey.fx):
                     # if maxact == blc -> fixed constraint
                     # i.e. chg upper to blc
@@ -159,25 +176,69 @@ class MyTask(mosek.Task):
                     # update vectors in order to not call get() which
                     # flushes updates -> slow down
                     bkc[con], buc[con] = mosek.boundkey.fx, blc[con]
+                elif (self.maxact[con] < buc[con]
+                    and self.maxact[con] <= self.size_tol):
+                    self.chgconbound(con, False, True, self.maxact[con])
 
-            if self.minactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
+
+            if self.minactinfcnt[con] == 0:
                 if self.minact[con] >= buc[con] + self.feas_tol:
                     raise Exception('Infeasible')
-                elif (abs(self.minact[con] - buc[con]) < self.feas_tol 
-                      and bkc[con] != mosek.boundkey.fx):
+                elif (self.minact[con] > buc[con] - self.feas_tol
+                    and bkc[con] != mosek.boundkey.fx):
                     # if minact == buc -> fixed constraint
                     # i.e. chg lower to buc
-                    self.chgconbound(con, 1, 1, buc[con])
+                    self.chgconbound(con, True, True, buc[con])
                     # update vectors in order to not call get() which
                     # flushes updates -> slow down
                     bkc[con], blc[con] = mosek.boundkey.fx, buc[con]
+                elif (self.minact[con] > blc[con]
+                    and self.minact[con] >= -self.size_tol):
+                    self.chgconbound(con, True, True, self.minact[con])
+
+
+
+        # for con in range(m):
+        #     if (self.maxactinfcnt[con] == 0 and self.maxact[con] < buc[con]
+        #         and self.maxact[con] <= self.size_tol):
+        #         self.chgconbound(con, False, True, self.maxact[con])
+        #     if (self.minactinfcnt[con] == 0 and self.minact[con] > blc[con]
+        #         and self.minact[con] >= -self.size_tol):
+        #         self.chgconbound(con, True, True, self.minact[con])
+                
+
+        # for con in range(m):
+        #     if self.maxactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
+        #         if self.maxact[con] <= blc[con] - self.feas_tol:
+        #             raise Exception('Infeasible')
+        #         if (self.maxact[con] - blc[con] < self.feas_tol
+        #             and bkc[con] != mosek.boundkey.fx):
+        #             # if maxact == blc -> fixed constraint
+        #             # i.e. chg upper to blc
+        #             self.chgconbound(con, 0, 1, blc[con])
+        #             # update vectors in order to not call get() which
+        #             # flushes updates -> slow down
+        #             bkc[con], buc[con] = mosek.boundkey.fx, blc[con]
+
+        #     if self.minactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
+        #         if self.minact[con] >= buc[con] + self.feas_tol:
+        #             raise Exception('Infeasible')
+        #         elif (abs(self.minact[con] - buc[con]) < self.feas_tol 
+        #               and bkc[con] != mosek.boundkey.fx):
+        #             # if minact == buc -> fixed constraint
+        #             # i.e. chg lower to buc
+        #             self.chgconbound(con, 1, 1, buc[con])
+        #             # update vectors in order to not call get() which
+        #             # flushes updates -> slow down
+        #             bkc[con], blc[con] = mosek.boundkey.fx, buc[con]
 
     def remove_redundant(self):
         """Removes redundant bounds and constraints based on constraint
         activity."""
-        print('Removing redundant constraints started')
+        #print('Removing redundant constraints started')
         m = self.getnumcon()
         bkc, blc, buc = self.getconboundslice(0, m)
+        inf = 0.0
 
         self.__calculate_minmaxact()
 
@@ -200,21 +261,22 @@ class MyTask(mosek.Task):
                     deletedrows.append(con)
             else:
                 if lower_redundant:
-                    self.chgconbound(con, True, False, self.neginf)
+                    self.chgconbound(con, True, False, -inf)
                 if upper_redundant:
-                    self.chgconbound(con, False, False, self.posinf)
+                    self.chgconbound(con, False, False, inf)
 
         bkc, _, _ = self.getconboundslice(0,m)
-        self.removecons([con for con in range(m) if bkc[con] == mosek.boundkey.fr] + deletedrows)
+        deletedrows+=[con for con in range(m) if bkc[con] == mosek.boundkey.fr]
+        self.removecons(deletedrows)
 
-        print(len(deletedrows))
-        print('Removing redundant constraints finished')
+        #print(len(deletedrows))
+        #print('Removing redundant constraints finished')
 
         # return len(deletedrows) == 0 # True if no removed
 
     def presolve_singleton(self):
         """Detects singleton cons and turn them into variable cons."""
-        print('Removing singletons started')
+        #print('Removing singletons started')
         m = self.getnumcon()
         n = self.getnumvar()
         singlecons = tuple(con for con in range(m) if self.getarownumnz(con) == 1)
@@ -226,7 +288,7 @@ class MyTask(mosek.Task):
 
         for con in singlecons:
             var = sub[ptrb[con]:ptre[con]][0]
-            a =  val[ptrb[con]:ptre[con]][0]
+            a = val[ptrb[con]:ptre[con]][0]
 
             if a > 0:
                 newu = min(buc[con]/a, bux[var])
@@ -245,7 +307,7 @@ class MyTask(mosek.Task):
         
         self.removecons(singlecons)
         #print(len(singlecons))
-        print('Removing singletons finished')
+        #print('Removing singletons finished')
 
     def __del_minmax(self):
         del self.minact
@@ -477,7 +539,7 @@ class MyTask(mosek.Task):
     def presolve_lindep(self):
         """Detects parallell rows in the matrix A and turn them into a single
         con."""
-        print('Started removing parallel rows')
+        #print('Started removing parallel rows')
 
         m = self.getnumcon()
         ptrb, ptre, sub, val = self.getarowslice(0, m)
@@ -554,8 +616,8 @@ class MyTask(mosek.Task):
 
         #print(deletedrows)
         self.removecons(deletedrows)
-        print(len(deletedrows))
-        print('Finished removing parallel rows')
+        #(len(deletedrows))
+        #print('Finished removing parallel rows')
         return len(deletedrows) == 0 # True if not removed
 
     # def chgconbound(self, con, lower, finite, newbound):
