@@ -791,15 +791,18 @@ class MyTask(mosek.Task):
             self.appendacc(expdomain, range(3*cone, 3*cone+3), None)
 
     def restrictToOptimalFace(self):
+        # get solution info
         _, _, skc, skx, _, xc, xx, _, slc, suc, slx, sux, _, _ = self.getsolutionnew(mosek.soltype.bas)
 
-        rx = [slx[j] - sux[j] for j in range(self.getnumvar())]
-        rc = [slc[i] - suc[i] for i in range(self.getnumcon())]
+        # calculate reduced cost
+        rx = tuple(slx[j] - sux[j] for j in range(self.getnumvar()))
+        rc = tuple(slc[i] - suc[i] for i in range(self.getnumcon()))
 
         # Find non-basic non-zero reduced costs
-        fixvars = [j for j, e in enumerate(rx) if abs(e) > 1e-6 and skx[j] != mosek.stakey.bas]
-        fixcons = [i for i, e in enumerate(rc) if abs(e) > 1e-6 and skc[i] != mosek.stakey.bas]
+        fixvars = tuple(j for j, e in enumerate(rx) if abs(e) > 1e-6 and skx[j] != mosek.stakey.bas)
+        fixcons = tuple(i for i, e in enumerate(rc) if abs(e) > 1e-6 and skc[i] != mosek.stakey.bas)
 
+        # fix variables and constraints
         for var in fixvars:
             self.putvarbound(var, mosek.boundkey.fx, xx[var], xx[var])
 
