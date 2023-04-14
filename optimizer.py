@@ -4,7 +4,7 @@ import csv
 
 def main():
     instances = list()
-    with open('benchmark-v2.txt', 'r') as file:
+    with open('benchmark-v2-small.txt', 'r') as file:
         for line in file:
             instances.append(line.replace('.mps.gz\n', '.task.gz'))
             #instances.append(line[0:-8] + '.task.gz')
@@ -18,12 +18,12 @@ def main():
               'Primal norm',
               'Dual norm']
 
-    createcsv('output_exp_presolve.stat', header)
-    createcsv('output_gm_presolve.stat', header)
+    createcsv('output_exp_optimalface_org_presolve_presolved.stat', header)
+    createcsv('output_gm_optimalface_org_presolve_presolved.stat', header)
 
     for instance in instances:
-        solve_export('benchmark_exp_presolve_1', instance, 'exp')
-        solve_export('benchmark_gm_presolve_1', instance, 'gm')
+        solve_export('benchmark_exp_optimalface_org_presolve_presolved', instance, 'exp')
+        solve_export('benchmark_gm_optimalface_org_presolve_presolved', instance, 'gm')
         
 def createcsv(filename, header):
     with open(filename, 'w') as csvfile:
@@ -55,7 +55,7 @@ def solve_export(folder, instance, model):
                 task.getdouinf(mosek.dinfitem.sol_itr_nrm_xx),
                 task.getdouinf(mosek.dinfitem.sol_itr_nrm_y)]
 
-        with open('output_%s_presolve.stat' %(model), 'a') as csvfile:
+        with open('output_%s_optimalface_org_presolve_presolved.stat' %(model), 'a') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(data)
 
