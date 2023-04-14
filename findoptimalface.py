@@ -1,51 +1,63 @@
 import mosek
 from MyTask import MyTask
 from helpfunctions import streamprinter
+from optimizer import createcsv
+import csv
 inf = 0.0
 
 def main():
-    with MyTask() as task:
-        task.set_Stream(mosek.streamtype.log, streamprinter)
+    importfolder = 'benchmark_presolved'
+    exportfolder = 'benchmark_optimalface_org_presolve'
+    statsfile = 'timing_optimalface_org_presolve.stat'
 
-        # import instance
-        #task.readdata('benchmark/30n20b8.mps.gz')
-        task.appendvars(2)
-        task.appendcons(2)
-        c = [3.0, 1.5]
-        #A = [[1.0, 2.0], [2.0, 1.0]]
-        sub = [0, 1]
-        ptrb = [0, 2]
-        ptre = [2, 4]
-        asub = [0, 1, 0, 1]
-        aval = [1.0, 2.0, 2.0, 1.0]
-        
-        bkx = [mosek.boundkey.lo, mosek.boundkey.lo]
-        blx = [0.0, 0.0]
-        bux = [inf, inf]
-        bkc = [mosek.boundkey.up, mosek.boundkey.up]
-        blc = [-inf, -inf]
-        buc = [8.0, 7.0]
+    header = ['Instance',
+              'Response code',
+              'Problem status',
+              'Solution status',
+              'Time',
+              'Iterations',
+              'Primal norm',
+              'Dual norm']
 
-        task.putclist([0, 1], c)
-        task.putarowlist(sub, ptrb, ptre, asub, aval)
-        task.putvarboundslice(0, 2, bkx, blx, bux)
-        task.putconboundslice(0, 2, bkc, blc, buc)
+    createcsv(statsfile, header)
 
-        task.putobjsense(mosek.objsense.maximize)
-        
-        # LP-relaxtion
-        n = task.getnumvar()
-        task.putvartypelist(range(n), [mosek.variabletype.type_cont,]*n)
+    with open('benchmark-v2.txt', 'r') as file:
+        i = 0
+        for line in file:
+            i += 1
+            instance = line.replace('.mps.gz\n', '')
 
-        # find basic solution
-        task.putdouparam(mosek.dparam.optimizer_max_time, 100.0)
-        task.optimize()
-        task.solutionsummary(mosek.streamtype.log)
-        
-        # restric to optimal face
-        task.restrictToOptimalFace()
-        task.writedata('debug/test_optface.ptf')
+            with MyTask() as task:
+                task.readdata(importfolder + '/' + instance + '.task.gz')
 
+                # LP-relaxtion
+                n = task.getnumvar()
+                task.putvartypelist(range(n),[mosek.variabletype.type_cont,]*n)
+
+                # Find basic solution
+                task.putdouparam(mosek.dparam.optimizer_max_time, 100.0)
+                rescode = task.optimize()
+
+                # Restrict to optimal face
+                task.restrictToOptimalFace()
+
+                # Export
+                task.writedata(exportfolder + '/' + instance + '.task.gz')
+                print('%d: Exported the optimal face of %s' %(i, instance))
+
+                task.updatesolutioninfo(mosek.soltype.bas)
+                data = [instance,
+                        rescode,
+                        task.getintinf(mosek.iinfitem.sol_bas_prosta),
+                        task.getintinf(mosek.iinfitem.sol_bas_solsta),
+                        task.getdouinf(mosek.dinfitem.optimizer_time),
+                        task.getintinf(mosek.iinfitem.intpnt_iter),
+                        task.getdouinf(mosek.dinfitem.sol_bas_nrm_xx),
+                        task.getdouinf(mosek.dinfitem.sol_bas_nrm_y)]
+
+                with open(statsfile, 'a') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(data)
 
 if __name__ == '__main__':
     main()
