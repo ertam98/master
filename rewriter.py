@@ -5,15 +5,14 @@ from timeit import default_timer as timer
 
 
 def main():
-    with open('benchmark-v2.txt', 'r') as file:
+    with open('benchmark-v2-small.txt', 'r') as file:
         for line in file:
             instance = line.replace('.mps.gz\n', '')
 
-            rewriter('exp', 'benchmark_presolved', instance, '.task.gz', 'benchmark_exp_presolve_1', False)
-            rewriter('gm', 'benchmark_presolved', instance, '.task.gz', 'benchmark_gm_presolve_1', False)
+            rewriter('exp', 'benchmark_optimalface_org_presolve_presolved', instance, '.task.gz', 'benchmark_exp_optimalface_org_presolve_presolved')
+            rewriter('gm', 'benchmark_optimalface_org_presolve_presolved', instance, '.task.gz', 'benchmark_gm_optimalface_org_presolve_presolved')
 
-
-def rewriter(model, importfolder, instance, fileformat, exportfolder, withpresolve):
+def rewriter(model, importfolder, instance, fileformat, exportfolder):
     if not (model == 'gm' or model == 'exp'):
         raise ValueError("Parameter 'model' needs to be 'gm' or 'exp'.")
 
@@ -25,23 +24,23 @@ def rewriter(model, importfolder, instance, fileformat, exportfolder, withpresol
         #                    mosek.dataformat.mps, 
         #                    mosek.compresstype.gzip)
 
-        if withpresolve:
-            try:
-                print('Starting presolve')
-                start = timer()
-                task.presolve()
-                # task.removeemptyrows()
-                # task.presolve_domain(1e8)
-                # task.remove_redundant(1e-6)
-                # task.presolve_lindep()
-                end = timer()
-                with open('timing_presolve_%s.stat' %(model), 'a') as file:
-                    file.write('%s, %f\n' %(instance, end-start))
-                print('Finished presolve in %f sek' %(end-start))
-            except Exception:
-                with open('timing_presolve_%s.stat' %(model), 'a') as file:
-                    file.write('%s, %s\n' %(instance, 'infeasible'))
-                print(instance, 'infeasible by presolve')
+        # if withpresolve:
+        #     try:
+        #         print('Starting presolve')
+        #         start = timer()
+        #         task.presolve()
+        #         # task.removeemptyrows()
+        #         # task.presolve_domain(1e8)
+        #         # task.remove_redundant(1e-6)
+        #         # task.presolve_lindep()
+        #         end = timer()
+        #         with open('timing_presolve_%s.stat' %(model), 'a') as file:
+        #             file.write('%s, %f\n' %(instance, end-start))
+        #         print('Finished presolve in %f sek' %(end-start))
+        #     except Exception:
+        #         with open('timing_org_presolve_%s.stat' %(model), 'a') as file:
+        #             file.write('%s, %s\n' %(instance, 'infeasible'))
+        #         print(instance, 'infeasible by presolve')
 
         n = task.getnumvar() # vars in original problem
 
