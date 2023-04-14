@@ -13,6 +13,7 @@ class MyTask(mosek.Task):
         self.feas_tol = 1e-6
         self.size_tol = 1e8
         self.near_lin_dep_tol = 1e5
+        self.redu_cost_tol = 1e-6
 
     def getarownumnzlist(self, start, stop):
         return [self.getarownumnz(i) for i in range(start, stop)]
@@ -196,42 +197,6 @@ class MyTask(mosek.Task):
                     and self.minact[con] >= -self.size_tol):
                     self.chgconbound(con, True, True, self.minact[con])
 
-
-
-        # for con in range(m):
-        #     if (self.maxactinfcnt[con] == 0 and self.maxact[con] < buc[con]
-        #         and self.maxact[con] <= self.size_tol):
-        #         self.chgconbound(con, False, True, self.maxact[con])
-        #     if (self.minactinfcnt[con] == 0 and self.minact[con] > blc[con]
-        #         and self.minact[con] >= -self.size_tol):
-        #         self.chgconbound(con, True, True, self.minact[con])
-                
-
-        # for con in range(m):
-        #     if self.maxactinfcnt[con] == 0 and self.__islfinite(bkc[con]):
-        #         if self.maxact[con] <= blc[con] - self.feas_tol:
-        #             raise Exception('Infeasible')
-        #         if (self.maxact[con] - blc[con] < self.feas_tol
-        #             and bkc[con] != mosek.boundkey.fx):
-        #             # if maxact == blc -> fixed constraint
-        #             # i.e. chg upper to blc
-        #             self.chgconbound(con, 0, 1, blc[con])
-        #             # update vectors in order to not call get() which
-        #             # flushes updates -> slow down
-        #             bkc[con], buc[con] = mosek.boundkey.fx, blc[con]
-
-        #     if self.minactinfcnt[con] == 0 and self.__isufinite(bkc[con]):
-        #         if self.minact[con] >= buc[con] + self.feas_tol:
-        #             raise Exception('Infeasible')
-        #         elif (abs(self.minact[con] - buc[con]) < self.feas_tol 
-        #               and bkc[con] != mosek.boundkey.fx):
-        #             # if minact == buc -> fixed constraint
-        #             # i.e. chg lower to buc
-        #             self.chgconbound(con, 1, 1, buc[con])
-        #             # update vectors in order to not call get() which
-        #             # flushes updates -> slow down
-        #             bkc[con], blc[con] = mosek.boundkey.fx, buc[con]
-
     def remove_redundant(self):
         """Removes redundant bounds and constraints based on constraint
         activity."""
@@ -351,8 +316,6 @@ class MyTask(mosek.Task):
                     self.maxactinfcnt[i] += 1
 
     def __update_minmaxact_upper(self, var, oldbkx, oldbux, newbkx, newbux, subj, valj):
-        #_, subj, valj = self.getacol(var)
-        #newbkx, _, newbux = self.getvarbound(var)
         
         # upper from infinite to finite
         if not self.__isufinite(oldbkx) and self.__isufinite(newbkx):
@@ -394,10 +357,6 @@ class MyTask(mosek.Task):
     def __dom_prop(self, con, var, bkx, blx, bux, bkc, blc, buc, aij):
         ubndchg, lbndchg = False, False
         tol = 1e3 * self.feas_tol # minimum increase in bound to be enough
-
-        #aij = self.getaij(con, var)
-        #bkc, blc, buc = self.getconbound(con)
-        #bkx, blx, bux = self.getvarbound(var)
 
         if bkx == mosek.boundkey.fx: # already fixed
             return ubndchg, lbndchg
@@ -620,32 +579,6 @@ class MyTask(mosek.Task):
         #print('Finished removing parallel rows')
         return len(deletedrows) == 0 # True if not removed
 
-    # def chgconbound(self, con, lower, finite, newbound):
-    #     """Adapted method to check feasibility and round for fixed cons."""
-        
-    #     if not finite:
-    #         super().chgconbound(con, lower, finite, newbound)
-    #     else:
-    #         _, blc, buc = self.getconbound(con)
-
-    #         if lower:
-    #             if not newbound <= buc + self.feas_tol:
-    #                 raise Exception('Infeasible')
-
-    #             if abs(newbound - buc) < self.feas_tol:
-    #                 super().chgconbound(con, lower, finite, buc)
-    #             else:
-    #                 super().chgconbound(con, lower, finite, newbound)
-
-    #         else: # change upper
-    #             if not blc <= newbound + self.feas_tol:
-    #                 raise Exception('Infeasible')
-
-    #             if abs(newbound - blc) < self.feas_tol:
-    #                 super().chgconbound(con, lower, finite, blc)
-    #             else:
-    #                 super().chgconbound(con, lower, finite, newbound)
-
     def chgvarbound(self, var, lower, finite, newbound):
         """Adapted method to round for fixed vars."""
 
@@ -662,28 +595,6 @@ class MyTask(mosek.Task):
                 super().chgvarbound(var, lower, finite, blx)
             else: # otherwise changed bound to newbound
                 super().chgvarbound(var, lower, finite, newbound)
-
-
-        # if not finite:
-        #     super().chgvarbound(var, lower, finite, newbound)
-        # else:
-        #     _, blx, bux = self.getvarbound(var)
-
-        #     if lower:
-        #         assert(newbound <= bux + self.feas_tol, 'Infeasible')
-
-        #         if abs(newbound - bux) < self.feas_tol:
-        #             super().chgvarbound(var, lower, finite, bux)
-        #         else:
-        #             super().chgvarbound(var, lower, finite, newbound)
-
-        #     else:
-        #         assert(blx - self.feas_tol <= newbound, 'Infeasible')
-
-        #         if abs(newbound - blx) < self.feas_tol:
-        #             super().chgvarbound(var, lower, finite, blx)
-        #         else:
-        #             super().chgvarbound(var, lower, finite, newbound)
 
     def __sortsparselist(self, subi, vali):
         # Adapted from https://stackoverflow.com/a/6618543
@@ -792,19 +703,31 @@ class MyTask(mosek.Task):
 
     def restrictToOptimalFace(self):
         # get solution info
-        _, _, skc, skx, _, xc, xx, _, slc, suc, slx, sux, _, _ = self.getsolutionnew(mosek.soltype.bas)
+        m, n = self.getnumcon(), self.getnumvar()
 
-        # calculate reduced cost
-        rx = tuple(slx[j] - sux[j] for j in range(self.getnumvar()))
-        rc = tuple(slc[i] - suc[i] for i in range(self.getnumcon()))
+        _, _, skc, skx, _, _, _, _, slc, suc, slx, sux, _, _ = self.getsolutionnew(mosek.soltype.bas)
+        
+        _, blc, buc = self.getconboundslice(0, m)
+        _, blx, bux = self.getvarboundslice(0, n)
 
-        # Find non-basic non-zero reduced costs
-        fixvars = tuple(j for j, e in enumerate(rx) if abs(e) > 1e-6 and skx[j] != mosek.stakey.bas)
-        fixcons = tuple(i for i, e in enumerate(rc) if abs(e) > 1e-6 and skc[i] != mosek.stakey.bas)
+        fxupvars = tuple(j for j, e in enumerate(sux) if skx[j] == mosek.stakey.upr and abs(e) > self.redu_cost_tol)
+        fxlovars = tuple(j for j, e in enumerate(slx) if skx[j] == mosek.stakey.low and abs(e) > self.redu_cost_tol)
+        
+        fxupcons = tuple(i for i, e in enumerate(suc) if skc[i] == mosek.stakey.upr and abs(e) > self.redu_cost_tol)
+        fxlocons = tuple(i for i, e in enumerate(slc) if skc[i] == mosek.stakey.low and abs(e) > self.redu_cost_tol)
 
-        # fix variables and constraints
-        for var in fixvars:
-            self.putvarbound(var, mosek.boundkey.fx, xx[var], xx[var])
+        for var in fxupvars:
+            # set new lower bound to upper bound for fixing
+            self.chgvarbound(var, True, True, bux[var])
 
-        for con in fixcons:
-            self.putconbound(con, mosek.boundkey.fx, xc[con], xc[con])
+        for var in fxlovars:
+            # set new upper bound to lower bound for fixing
+            self.chgvarbound(var, False, True, blx[var])
+
+        for con in fxupcons:
+            # set new lower bound to upper for fixing
+            self.chgconbound(con, True, True, buc[con])
+
+        for con in fxlocons:
+            # set new lower bound to upper for fixing
+            self.chgconbound(con, False, True, blc[con])
